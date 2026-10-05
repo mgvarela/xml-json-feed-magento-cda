@@ -1,29 +1,26 @@
 const axios = require('axios');
 const { XMLParser } = require('fast-xml-parser');
 
+// 1. Listado de todos los feeds por categoría que querés unificar en el JSON global
 const GLOBAL_FEEDS = [
     'https://casadelaudio.com/media/feed/api_info_uke.xml',
+    // Acá podés sumar las demás categorías cuando las generes en Magento:
+    // 'https://casadelaudio.com/media/feed/api_info_electro.xml',
+    // 'https://casadelaudio.com/media/feed/api_info_tecno.xml'
 ];
 
-function cleanDescription(htmlText) {
-    if (!htmlText || htmlText === 'null') return null;
-    let clean = htmlText.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
-    clean = clean.replace(/#html-body\s*\[data-pb-style[^\]]*\]\s*\{[^}]*\}/gi, '');
-    clean = clean.replace(/<[^>]*>?/gm, '');
-    return clean.trim() !== '' ? clean.trim() : null;
-}
-
-function sanitizeUnit(value, unit) {
-    if (!value || value === 'null') return null;
-    let strVal = String(value).trim();
-    strVal = strVal.replace(new RegExp(`\\s*${unit}\\s*${unit}`, 'gi'), ` ${unit}`);
-    if (!strVal.toLowerCase().includes(unit.toLowerCase())) {
-        strVal += ` ${unit}`;
+// Función auxiliar para normalizar unidades de medida si es necesario
+function sanitizeUnit(value, defaultUnit) {
+    if (!value) return '';
+    let text = String(value).trim();
+    if (text.toLowerCase().includes(defaultUnit)) {
+        return text.replace(/\s+/g, ' ');
     }
-    return strVal;
+    return `${text}${defaultUnit}`;
 }
 
 module.exports = async (req, res) => {
+    // Headers de caché horaria en Vercel y CORS
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -34,6 +31,7 @@ module.exports = async (req, res) => {
     }
 
     try {
+        // 2. Validar Token por Header (Authorization: Bearer)
         const authHeader = req.headers.authorization;
         const SERVER_TOKEN = process.env.API_SECRET_TOKEN;
 
@@ -50,14 +48,11 @@ module.exports = async (req, res) => {
             });
         }
 
-        const mode = req.query.mode || 'pricing'; 
-        const sinceFilter = req.query.since ? new Date(req.query.since) : null;
         const targetCostosUrl = process.env.COSTOS_JSON_URL;
 
+        // 3. Preparar peticiones en paralelo: Descargar TODOS los XMLs de las categorías + Costos locales
         const feedPromises = GLOBAL_FEEDS.map(url => 
-            axios.get(url, { responseType: 'text', timeout: 25000 })
-                 .then(response => ({ url, data: response.data, error: false }))
-                 .catch(err => ({ url, error: true, message: err.message }))
+            axios.get(url, { responseType: 'text', timeout: 25000 }).catch(err => ({ error: true, message: err.message }))
         );
 
         if (targetCostosUrl) {
@@ -65,83 +60,92 @@ module.exports = async (req, res) => {
         }
 
         const responses = await Promise.all(feedPromises);
+        
+        // Separar costos (último elemento si existía targetCostosUrl, o array vacío)
         const costosData = targetCostosUrl ? (responses[responses.length - 1].data || []) : [];
         const xmlResponses = targetCostosUrl ? responses.slice(0, -1) : responses;
 
+        // 4. Mapear costos y stock por SKU para cruce rápido en memoria O(1)
         const costosMap = {};
         if (Array.isArray(costosData)) {
             costosData.forEach(item => {
-                const skuKey = String(item.sku || item.SKU || '').trim();
+                const skuKey = String(item.sku || item.SKU || '').trim().toUpperCase();
                 if (skuKey) {
                     costosMap[skuKey] = {
                         costo: Number(item.costo || item.cost || item.precio_costo || 0),
-                        stock: item.stock !== undefined ? Number(item.stock) : null
+                        stock: item.stock !== undefined ? Number(item.stock) : undefined
                     };
                 }
             });
         }
 
         const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" });
-        let processedProducts = [];
-        let processedFeedsList = [];
+        let allNormalizedProducts = [];
 
+        // Atributos base o internos que no deben entrar en el mapa dinámico de especificaciones técnicas
+        const keysToExclude = [
+            'sku', 'nombre', 'marca', 'categoria', 'url', 'habilitado', 'updated_at', 
+            'pricing', 'logistica', 'catalogo', 'atributos', 'imagenes'
+        ];
+
+        // 5. Procesar cada XML de categoría, aplicar atributos dinámicos y unificar
         for (const xmlRes of xmlResponses) {
-            if (xmlRes.error) {
-                processedFeedsList.push({ url: xmlRes.url, status: 'error', message: xmlRes.message });
-                continue;
-            }
-
-            processedFeedsList.push({ url: xmlRes.url, status: 'success' });
+            if (xmlRes.error) continue; // Si un feed falla, salta al siguiente sin romper el global
 
             const jsonObj = parser.parse(xmlRes.data);
             let rawItems = jsonObj?.catalog?.product || jsonObj?.rss?.channel?.item || jsonObj?.elements || jsonObj?.item || [];
             if (!Array.isArray(rawItems)) rawItems = [rawItems];
 
-            const mappedItems = rawItems.map(prod => {
+            const normalizedProducts = rawItems.map(prod => {
                 const sku = prod.sku ? String(prod.sku).trim() : null;
-                const localData = (sku && costosMap[sku]) ? costosMap[sku] : { costo: null, stock: null };
+                const skuKey = sku ? sku.toUpperCase() : '';
+                const infoExterna = (skuKey && costosMap[skuKey]) ? costosMap[skuKey] : {};
 
-                const prodUpdatedAt = prod.updated_at ? new Date(prod.updated_at) : new Date();
-                if (sinceFilter && prodUpdatedAt < sinceFilter) {
-                    return null; 
-                }
+                const costoFinal = infoExterna.costo !== undefined ? infoExterna.costo : null;
+                const stockFinal = infoExterna.stock !== undefined ? infoExterna.stock : (prod.logistica?.stock !== undefined ? Number(prod.logistica.stock) : 0);
 
-                const finalStock = localData.stock !== null ? localData.stock : (prod.logistica?.stock !== undefined ? Number(prod.logistica.stock) : 0);
-
-                if (mode === 'pricing') {
-                    return {
-                        sku: sku,
-                        habilitado: prod.habilitado === true || prod.habilitado === 'true',
-                        updated_at: prod.updated_at || new Date().toISOString(),
-                        pricing: {
-                            precio_lista: prod.pricing?.precio_lista ? Number(prod.pricing.precio_lista) : null,
-                            precio_un_pago: prod.pricing?.precio_un_pago ? Number(prod.pricing.precio_un_pago) : null,
-                            cuotas_sin_interes: prod.pricing?.cuotas_sin_interes ? Number(prod.pricing.cuotas_sin_interes) : null
-                        },
-                        logistica: {
-                            costo: localData.costo,
-                            stock: finalStock
-                        }
-                    };
-                }
-
+                // EXTRACCIÓN DINÁMICA DE ATRIBUTOS (Reemplazando el mapeo estático anterior)
                 let atributosMap = {};
-                if (prod.ean) atributosMap['ean'] = String(prod.ean).trim();
-                if (prod.modelo) atributosMap['modelo'] = String(prod.modelo).trim();
-                if (prod.color) atributosMap['color'] = String(prod.color).trim();
-                if (prod.alto_producto) atributosMap['alto'] = sanitizeUnit(prod.alto_producto, 'cm');
-                if (prod.ancho_producto) atributosMap['ancho'] = sanitizeUnit(prod.ancho_producto, 'cm');
-                if (prod.profundidad_producto) atributosMap['profundidad'] = sanitizeUnit(prod.profundidad_producto, 'cm');
-                if (prod.peso) atributosMap['peso'] = sanitizeUnit(prod.peso, 'kg');
 
-                if (prod.litros_brutos) atributosMap['litros_brutos'] = `${prod.litros_brutos} L`;
-                if (prod.litros_netos) atributosMap['litros_netos'] = `${prod.litros_netos} L`;
-                if (prod.potencia_w) atributosMap['potencia'] = `${prod.potencia_w} W`;
-                if (prod.frigorias) atributosMap['frigorias'] = String(prod.frigorias).trim();
-                if (prod.pulgadas) atributosMap['pulgadas'] = `${prod.pulgadas}"`;
-                if (prod.carga_kg) atributosMap['carga'] = `${prod.carga_kg} kg`;
-                if (prod.almacenamiento) atributosMap['almacenamiento'] = String(prod.almacenamiento).trim();
-                if (prod.ram) atributosMap['ram'] = String(prod.ram).trim();
+                // A. Si los atributos vienen en el formato estructurado tradicional del XML del feed
+                if (prod.catalogo && prod.catalogo.atributos) {
+                    let rawAtribs = prod.catalogo.atributos.atributo;
+                    if (!Array.isArray(rawAtribs)) rawAtribs = [rawAtribs];
+                    rawAtribs.forEach(atrib => {
+                        if (atrib && atrib.codigo && atrib.valor !== undefined) {
+                            const codigo = String(atrib.codigo).trim();
+                            // Omitir filtros por rangos
+                            if (!codigo.includes('filtro') && !codigo.endsWith('_filtro')) {
+                                atributosMap[codigo] = String(atrib.valor).trim();
+                            }
+                        }
+                    });
+                }
+
+                // B. Bionda de barrido dinámico general sobre las propiedades planas del producto si existieran
+                for (const [key, value] of Object.entries(prod)) {
+                    if (value === undefined || value === null || String(value).trim() === '' || String(value) === 'null') continue;
+                    if (keysToExclude.includes(key)) continue;
+                    if (key.includes('filtro') || key.endsWith('_filtro')) continue;
+
+                    let cleanKey = key.toLowerCase();
+                    let cleanVal = String(value).trim();
+
+                    // Normalización inteligente opcional de unidades si vienen planas
+                    if (cleanKey.includes('alto') || cleanKey.includes('ancho') || cleanKey.includes('profundidad')) {
+                        atributosMap[cleanKey.replace('_producto', '')] = sanitizeUnit(cleanVal, 'cm');
+                    } else if (cleanKey.includes('peso') || cleanKey.includes('carga')) {
+                        atributosMap['peso'] = sanitizeUnit(cleanVal, 'kg');
+                    } else if (cleanKey.includes('litros')) {
+                        atributosMap[cleanKey] = `${cleanVal} L`;
+                    } else if (cleanKey.includes('potencia')) {
+                        atributosMap['potencia'] = `${cleanVal} W`;
+                    } else if (cleanKey.includes('pulgadas')) {
+                        atributosMap['pulgadas'] = `${cleanVal}"`;
+                    } else {
+                        atributosMap[cleanKey] = cleanVal;
+                    }
+                }
 
                 let imagenesList = [];
                 if (prod.catalogo && prod.catalogo.imagenes) {
@@ -156,33 +160,42 @@ module.exports = async (req, res) => {
                     marca: prod.marca !== 'null' ? prod.marca : null,
                     categoria: prod.categoria !== 'null' ? prod.categoria : null,
                     url: prod.url || null,
+                    habilitado: prod.habilitado === true || prod.habilitado === 'true',
                     updated_at: prod.updated_at || new Date().toISOString(),
+                    pricing: {
+                        precio_lista: prod.pricing?.precio_lista !== 'null' && prod.pricing?.precio_lista !== undefined ? Number(prod.pricing.precio_lista) : null,
+                        precio_un_pago: prod.pricing?.precio_un_pago !== 'null' && prod.pricing?.precio_un_pago !== undefined ? Number(prod.pricing.precio_un_pago) : null,
+                        cuotas_sin_interes: prod.pricing?.cuotas_sin_interes !== 'null' && prod.pricing?.cuotas_sin_interes !== undefined ? Number(prod.pricing.cuotas_sin_interes) : null
+                    },
+                    logistica: {
+                        costo: costoFinal,
+                        stock: stockFinal
+                    },
                     catalogo: {
-                        descripcion_corta: cleanDescription(prod.catalogo?.descripcion_corta),
-                        descripcion: cleanDescription(prod.catalogo?.descripcion),
+                        descripcion_corta: prod.catalogo?.descripcion_corta !== 'null' ? prod.catalogo.descripcion_corta : null,
+                        descripcion: prod.catalogo?.descripcion !== 'null' ? prod.catalogo.descripcion : null,
                         atributos: atributosMap,
                         imagenes: imagenesList.length > 0 ? imagenesList : null
                     }
                 };
-            }).filter(item => item !== null);
+            });
 
-            processedProducts = processedProducts.concat(mappedItems);
+            allNormalizedProducts = allNormalizedProducts.concat(normalizedProducts);
         }
 
         return res.status(200).json({
             generated_at: new Date().toISOString(),
             success: true,
-            mode: mode,
-            feeds_processed: processedFeedsList,
-            total_products: processedProducts.length,
-            products: processedProducts
+            total_feeds_processed: xmlResponses.filter(r => !r.error).length,
+            total_products: allNormalizedProducts.length,
+            products: allNormalizedProducts
         });
 
     } catch (error) {
         return res.status(500).json({
             generated_at: new Date().toISOString(),
             success: false,
-            error: 'No se pudo procesar el feed solicitado',
+            error: 'No se pudo procesar el consolidado global de feeds',
             details: error.message
         });
     }
