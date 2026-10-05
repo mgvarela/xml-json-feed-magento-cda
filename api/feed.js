@@ -8,7 +8,7 @@ const GLOBAL_FEEDS = process.env.FEED_URLS
     ? process.env.FEED_URLS.split(',').map(s => s.trim()).filter(Boolean)
     : [
         'https://casadelaudio.com/media/feed/api_info_uke.xml',
-        // 'https://casadelaudio.com/media/feed/api_info_electro.xml',
+        'https://casadelaudio.com/media/feed/api_info_electro.xml',
         // 'https://casadelaudio.com/media/feed/api_info_tecno.xml'
     ];
 
