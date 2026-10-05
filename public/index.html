@@ -168,11 +168,11 @@
       updateEndpointUrl();
     }
 
-    function updateEndpointUrl() {
-      const defaultXml = document.getElementById('xmlUrl').value.trim();
-      const fullUrl = `${window.location.origin}/api/feed?token=${API_TOKEN}&url=${encodeURIComponent(defaultXml)}`;
-      document.getElementById('apiUrlOutput').value = fullUrl;
-    }
+        function updateEndpointUrl() {
+        const defaultXml = document.getElementById('xmlUrl').value.trim();
+        const fullUrl = `${window.location.origin}/api/feed?url=${encodeURIComponent(defaultXml)}`;
+        document.getElementById('apiUrlOutput').value = fullUrl;
+        }
 
     document.getElementById('xmlUrl').addEventListener('input', updateEndpointUrl);
 
@@ -190,13 +190,13 @@
       btn.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span> Procesando...`;
 
       try {
-       const apiCallUrl = `/api/feed?url=${encodeURIComponent(urlInput)}`;
-       const response = await fetch(apiCallUrl, {
-            method: 'GET',
-            headers: {
-                'Authorization': `Bearer ${API_TOKEN}` 
-            }
-       });
+        const apiCallUrl = `/api/feed?url=${encodeURIComponent(urlInput)}`;
+        const response = await fetch(apiCallUrl, {
+        method: 'GET',
+        headers: {
+            'Authorization': `Bearer ${API_TOKEN}` // El token viaja protegido acá adentro
+        }
+        });
         const result = await response.json();
 
         if (!result.success) throw new Error(result.error || 'Error desconocido');

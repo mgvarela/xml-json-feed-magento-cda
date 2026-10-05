@@ -12,24 +12,13 @@ module.exports = async (req, res) => {
     }
 
     try {
-        // 1. Leer el token desde las cabeceras HTTP (Authorization: Bearer TU_TOKEN)
+        // 1. Validar Token por Header (Authorization: Bearer)
         const authHeader = req.headers.authorization;
         const SERVER_TOKEN = process.env.API_SECRET_TOKEN;
 
-        if (!SERVER_TOKEN) {
-            return res.status(500).json({ 
-                generated_at: new Date().toISOString(),
-                success: false, 
-                error: 'Error de servidor: Falta configurar el token en Vercel.' 
-            });
-        }
-
         let tokenValid = false;
         if (authHeader && authHeader.startsWith('Bearer ')) {
-            const tokenProvided = authHeader.split(' ')[1];
-            if (tokenProvided === SERVER_TOKEN) {
-                tokenValid = true;
-            }
+            if (authHeader.split(' ')[1] === SERVER_TOKEN) tokenValid = true;
         }
 
         if (!tokenValid) {
@@ -40,19 +29,20 @@ module.exports = async (req, res) => {
             });
         }
 
-        const { url: xmlUrl, costos_url: costosUrl } = req.query;
+        // 2. Obtener la URL del XML desde la variable de entorno (o por query si se envía explícitamente)
+        const xmlUrl = req.query.url || process.env.MAGENTO_XML_URL;
+        const targetCostosUrl = process.env.COSTOS_JSON_URL;
 
         if (!xmlUrl) {
             return res.status(400).json({ 
                 generated_at: new Date().toISOString(),
                 success: false, 
-                error: 'Falta la URL del XML de Magento en los parámetros (?url=).' 
+                error: 'No se encontró la URL del XML configurada en el servidor.' 
             });
         }
 
-        // 2. Descargar XML de Magento y Costos en paralelo
+        // 3. Descargar XML de Magento y Costos en paralelo
         const requests = [axios.get(xmlUrl, { responseType: 'text', timeout: 20000 })];
-        const targetCostosUrl = costosUrl || process.env.COSTOS_JSON_URL; 
         if (targetCostosUrl) {
             requests.push(axios.get(targetCostosUrl, { timeout: 20000 }).catch(() => ({ data: [] })));
         }
@@ -61,7 +51,7 @@ module.exports = async (req, res) => {
         const xmlResponse = responses[0];
         const costosData = responses[1] ? responses[1].data : [];
 
-        // 3. Mapear costos por SKU
+        // 4. Mapear costos por SKU
         const costosMap = {};
         if (Array.isArray(costosData)) {
             costosData.forEach(item => {
@@ -71,14 +61,14 @@ module.exports = async (req, res) => {
             });
         }
 
-        // 4. Parsear XML
+        // 5. Parsear XML
         const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" });
         const jsonObj = parser.parse(xmlResponse.data);
 
         let rawItems = jsonObj?.rss?.channel?.item || jsonObj?.elements || jsonObj?.catalog?.product || jsonObj?.item || [];
         if (!Array.isArray(rawItems)) rawItems = [rawItems];
 
-        // 5. Normalizar productos y cruzar costos
+        // 6. Normalizar y cruzar costos
         const normalizedProducts = rawItems.map(prod => {
             const sku = prod.sku || prod.g_id || prod.id ? String(prod.sku || prod.g_id || prod.id).trim() : null;
             const costoFinal = (sku && costosMap[sku] !== undefined) ? costosMap[sku] : (prod.cost ? Number(prod.cost) : null);
