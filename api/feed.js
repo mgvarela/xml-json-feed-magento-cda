@@ -1,12 +1,32 @@
 const axios = require('axios');
 const { XMLParser } = require('fast-xml-parser');
 
-// Listado centralizado de feeds por categoría
 const GLOBAL_FEEDS = [
     'https://casadelaudio.com/media/feed/api_info_uke.xml',
-    // 'https://casadelaudio.com/media/feed/api_info_electro.xml',
-    // 'https://casadelaudio.com/media/feed/api_info_tecno.xml'
 ];
+
+// Función auxiliar para limpiar CSS de Page Builder y etiquetas de estilo
+function cleanDescription(htmlText) {
+    if (!htmlText || htmlText === 'null') return null;
+    // Eliminar bloques <style>...</style> y estilos inline de Page Builder
+    let clean = htmlText.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+    clean = clean.replace(/#html-body\s*\[data-pb-style[^\]]*\]\s*\{[^}]*\}/gi, '');
+    // Remover tags HTML y dejar texto plano
+    clean = clean.replace(/<[^>]*>?/gm, '');
+    return clean.trim() !== '' ? clean.trim() : null;
+}
+
+// Función auxiliar para limpiar unidades duplicadas (ej: "32.5 cm cm" -> "32.5 cm")
+function sanitizeUnit(value, unit) {
+    if (!value || value === 'null') return null;
+    let strVal = String(value).trim();
+    // Quitar la unidad si ya la trae repetida
+    strVal = strVal.replace(new RegExp(`\\s*${unit}\\s*${unit}`, 'gi'), ` ${unit}`);
+    if (!strVal.toLowerCase().includes(unit.toLowerCase())) {
+        strVal += ` ${unit}`;
+    }
+    return strVal;
+}
 
 module.exports = async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -35,9 +55,13 @@ module.exports = async (req, res) => {
             });
         }
 
+        // Parámetro para elegir el modo: ?mode=pricing (liviano) o ?mode=catalog (completo diario)
+        const mode = req.query.mode || 'pricing'; 
+        // Parámetro opcional para filtro Delta (ej: ?since=2026-10-05T00:00:00Z)
+        const sinceFilter = req.query.since ? new Date(req.query.since) : null;
+
         const targetCostosUrl = process.env.COSTOS_JSON_URL;
 
-        // Descarga concurrente de feeds y costos
         const feedPromises = GLOBAL_FEEDS.map(url => 
             axios.get(url, { responseType: 'text', timeout: 25000 })
                  .then(response => ({ url, data: response.data, error: false }))
@@ -49,21 +73,25 @@ module.exports = async (req, res) => {
         }
 
         const responses = await Promise.all(feedPromises);
-        
         const costosData = targetCostosUrl ? (responses[responses.length - 1].data || []) : [];
         const xmlResponses = targetCostosUrl ? responses.slice(0, -1) : responses;
 
+        // Mapeo de costos y stock local (Fuente de verdad prioritaria)
         const costosMap = {};
         if (Array.isArray(costosData)) {
             costosData.forEach(item => {
                 const skuKey = String(item.sku || item.SKU || '').trim();
-                const costVal = item.costo || item.cost || item.precio_costo || 0;
-                if (skuKey) costosMap[skuKey] = Number(costVal);
+                if (skuKey) {
+                    costosMap[skuKey] = {
+                        costo: Number(item.costo || item.cost || item.precio_costo || 0),
+                        stock: item.stock !== undefined ? Number(item.stock) : null
+                    };
+                }
             });
         }
 
         const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" });
-        let allNormalizedProducts = [];
+        let processedProducts = [];
         let processedFeedsList = [];
 
         for (const xmlRes of xmlResponses) {
@@ -78,20 +106,62 @@ module.exports = async (req, res) => {
             let rawItems = jsonObj?.catalog?.product || jsonObj?.rss?.channel?.item || jsonObj?.elements || jsonObj?.item || [];
             if (!Array.isArray(rawItems)) rawItems = [rawItems];
 
-            const normalizedProducts = rawItems.map(prod => {
+            const mappedItems = rawItems.map(prod => {
                 const sku = prod.sku ? String(prod.sku).trim() : null;
-                const costoFinal = (sku && costosMap[sku] !== undefined) ? costosMap[sku] : null;
+                const localData = (sku && costosMap[sku]) ? costosMap[sku] : { costo: null, stock: null };
 
-                let atributosMap = {};
-                if (prod.catalogo && prod.catalogo.atributos) {
-                    let rawAtribs = prod.catalogo.atributos.atributo;
-                    if (!Array.isArray(rawAtribs)) rawAtribs = [rawAtribs];
-                    rawAtribs.forEach(atrib => {
-                        if (atrib && atrib.codigo && atrib.valor !== undefined) {
-                            atributosMap[atrib.codigo] = atrib.valor;
-                        }
-                    });
+                // Validación de fecha real updated_at para filtro Delta
+                const prodUpdatedAt = prod.updated_at ? new Date(prod.updated_at) : new Date();
+                if (sinceFilter && prodUpdatedAt < sinceFilter) {
+                    return null; // Si no cambió y hay filtro Delta, lo omitimos
                 }
+
+                // Prioridad de stock: si el JSON local tiene stock definido, se prioriza frente al feed desfasado
+                const finalStock = localData.stock !== null ? localData.stock : (prod.logistica?.stock !== undefined ? Number(prod.logistica.stock) : 0);
+
+                // ==========================================
+                // MODO PRICING (Liviano - Cada 1 hora)
+                // ==========================================
+                if (mode === 'pricing') {
+                    return {
+                        sku: sku,
+                        habilitado: prod.habilitado === true || prod.habilitado === 'true',
+                        updated_at: prod.updated_at || new Date().toISOString(),
+                        pricing: {
+                            precio_lista: prod.pricing?.precio_lista ? Number(prod.pricing.precio_lista) : null,
+                            precio_un_pago: prod.pricing?.precio_un_pago ? Number(prod.pricing.precio_un_pago) : null,
+                            cuotas_sin_interes: prod.pricing?.cuotas_sin_interes ? Number(prod.pricing.cuotas_sin_interes) : null
+                        },
+                        logistica: {
+                            costo: localData.costo,
+                            stock: finalStock
+                        }
+                    };
+                }
+
+                // ==========================================
+                // MODO CATALOGO (Completo - Madrugada / Delta)
+                // ==========================================
+                let atributosMap = {};
+
+                // Generales obligatorios si existen
+                if (prod.ean) atributosMap['ean'] = String(prod.ean).trim();
+                if (prod.modelo) atributosMap['modelo'] = String(prod.modelo).trim();
+                if (prod.color) atributosMap['color'] = String(prod.color).trim();
+                if (prod.alto_producto) atributosMap['alto'] = sanitizeUnit(prod.alto_producto, 'cm');
+                if (prod.ancho_producto) atributosMap['ancho'] = sanitizeUnit(prod.ancho_producto, 'cm');
+                if (prod.profundidad_producto) atributosMap['profundidad'] = sanitizeUnit(prod.profundidad_producto, 'cm');
+                if (prod.peso) atributosMap['peso'] = sanitizeUnit(prod.peso, 'kg');
+
+                // Condicionales según categoría (solo viajan si tienen valor)
+                if (prod.litros_brutos) atributosMap['litros_brutos'] = `${prod.litros_brutos} L`;
+                if (prod.litros_netos) atributosMap['litros_netos'] = `${prod.litros_netos} L`;
+                if (prod.potencia_w) atributosMap['potencia'] = `${prod.potencia_w} W`;
+                if (prod.frigorias) atributosMap['frigorias'] = String(prod.frigorias).trim();
+                if (prod.pulgadas) atributosMap['pulgadas'] = `${prod.pulgadas}"`;
+                if (prod.carga_kg) atributosMap['carga'] = `${prod.carga_kg} kg`;
+                if (prod.almacenamiento) atributosMap['almacenamiento'] = String(prod.almacenamiento).trim();
+                if (prod.ram) atributosMap['ram'] = String(prod.ram).trim();
 
                 let imagenesList = [];
                 if (prod.catalogo && prod.catalogo.imagenes) {
@@ -106,42 +176,33 @@ module.exports = async (req, res) => {
                     marca: prod.marca !== 'null' ? prod.marca : null,
                     categoria: prod.categoria !== 'null' ? prod.categoria : null,
                     url: prod.url || null,
-                    habilitado: prod.habilitado === true || prod.habilitado === 'true',
                     updated_at: prod.updated_at || new Date().toISOString(),
-                    pricing: {
-                        precio_lista: prod.pricing?.precio_lista !== 'null' && prod.pricing?.precio_lista !== undefined ? Number(prod.pricing.precio_lista) : null,
-                        precio_un_pago: prod.pricing?.precio_un_pago !== 'null' && prod.pricing?.precio_un_pago !== undefined ? Number(prod.pricing.precio_un_pago) : null,
-                        cuotas_sin_interes: prod.pricing?.cuotas_sin_interes !== 'null' && prod.pricing?.cuotas_sin_interes !== undefined ? Number(prod.pricing.cuotas_sin_interes) : null
-                    },
-                    logistica: {
-                        costo: costoFinal,
-                        stock: prod.logistica?.stock !== undefined ? Number(prod.logistica.stock) : 0
-                    },
                     catalogo: {
-                        descripcion_corta: prod.catalogo?.descripcion_corta !== 'null' ? prod.catalogo.descripcion_corta : null,
-                        descripcion: prod.catalogo?.descripcion !== 'null' ? prod.catalogo.descripcion : null,
+                        descripcion_corta: cleanDescription(prod.catalogo?.descripcion_corta),
+                        descripcion: cleanDescription(prod.catalogo?.descripcion),
                         atributos: atributosMap,
                         imagenes: imagenesList.length > 0 ? imagenesList : null
                     }
                 };
-            });
+            }).filter(item => item !== null); // Limpiar nulos del filtro delta
 
-            allNormalizedProducts = allNormalizedProducts.concat(normalizedProducts);
+            processedProducts = processedProducts.concat(mappedItems);
         }
 
         return res.status(200).json({
             generated_at: new Date().toISOString(),
             success: true,
+            mode: mode,
             feeds_processed: processedFeedsList,
-            total_products: allNormalizedProducts.length,
-            products: allNormalizedProducts
+            total_products: processedProducts.length,
+            products: processedProducts
         });
 
     } catch (error) {
         return res.status(500).json({
             generated_at: new Date().toISOString(),
             success: false,
-            error: 'No se pudo procesar el consolidado global de feeds',
+            error: 'No se pudo procesar el feed solicitado',
             details: error.message
         });
     }
