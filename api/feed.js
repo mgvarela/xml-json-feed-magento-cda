@@ -43,5 +43,4 @@ module.exports = async (req, res) => {
             details: error.message
         });
     }
->>>>>>> f273f8fca5418738f3733aa047b9593743ad8903
 };
