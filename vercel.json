@@ -1,6 +1,7 @@
 {
   "version": 2,
   "rewrites": [
-    { "source": "/api/feed", "destination": "/api/feed" }
+    { "source": "/", "destination": "/index.html" },
+    { "source": "/api/feed", "destination": "/api/feed.js" }
   ]
 }

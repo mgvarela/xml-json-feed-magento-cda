@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Feed XML to JSON - Casa del Audio</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { background-color: #f4f6f9; }
+    .card { border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+    pre { background: #212529; color: #f8f9fa; padding: 15px; border-radius: 8px; max-height: 350px; overflow-y: auto; }
+  </style>
+</head>
+<body>
+
+  <div class="container py-5">
+    <div class="row justify-content-center">
+      <div class="col-lg-10">
+        
+        <div class="card p-4 mb-4">
+          <h2 class="h4 mb-2 fw-bold text-primary">Conversor de Feed XML ➔ JSON & Generador de API</h2>
+          <p class="text-muted">Pegá la URL de tu feed XML de Magento para generar el JSON, descargarlo o usar la URL directa en Postman y tu bot de pricing.</p>
+
+          <div class="mb-3">
+            <label for="xmlUrl" class="form-label fw-semibold">URL del Feed XML (Magento)</label>
+            <div class="input-group">
+              <input type="url" id="xmlUrl" class="form-control" placeholder="https://tu-tienda.com/media/feeds/catalog.xml" value="https://">
+              <button class="btn btn-primary" type="button" id="btnProcess">Procesar y Generar JSON</button>
+            </div>
+          </div>
+
+          <!-- URLs listas para usar -->
+          <div id="apiInfoSection" class="d-none mt-3 p-3 bg-light border rounded">
+            <h6 class="fw-bold text-dark mb-2">🔗 URLs listas para tu Bot o Postman:</h6>
+            <div class="input-group mb-2">
+              <span class="input-group-text">API Endpoint</span>
+              <input type="text" id="apiUrlOutput" class="form-control bg-white" readonly>
+              <button class="btn btn-outline-secondary" type="button" id="copyApiUrl">Copiar URL</button>
+            </div>
+            <small class="text-muted">Podés pasarle cualquier XML dinámicamente agregando `?url=TU_URL_XML` al final de la API.</small>
+          </div>
+        </div>
+
+        <!-- Vista Previa y Acciones -->
+        <div class="card p-4 d-none" id="previewCard">
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <h5 class="mb-0">Vista previa del JSON</h5>
+            <div>
+              <button id="btnDownload" class="btn btn-success btn-sm">Descargar .json</button>
+              <button id="btnCopyJson" class="btn btn-outline-secondary btn-sm">Copiar JSON</button>
+            </div>
+          </div>
+          <pre><code id="jsonOutput"></code></pre>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let jsonResultString = '';
+
+    document.getElementById('btnProcess').addEventListener('click', async () => {
+      const urlInput = document.getElementById('xmlUrl').value.trim();
+      if (!urlInput || urlInput === 'https://') {
+        alert('Por favor, ingresá una URL de XML válida.');
+        return;
+      }
+
+      const btn = document.getElementById('btnProcess');
+      btn.disabled = true;
+      btn.textContent = 'Procesando...';
+
+      try {
+        // Llamamos a nuestra propia API serverless para hacer el fetch y parseo
+        const apiCallUrl = `/api/feed?url=${encodeURIComponent(urlInput)}`;
+        const response = await fetch(apiCallUrl);
+        const result = await response.json();
+
+        if (!result.success) throw new Error(result.error);
+
+        jsonResultString = JSON.stringify(result.data, null, 2);
+        document.getElementById('jsonOutput').textContent = jsonResultString;
+        
+        // Mostrar sección de URLs y Preview
+        document.getElementById('previewCard').classList.remove('d-none');
+        document.getElementById('apiInfoSection').classList.remove('d-none');
+
+        // Generar la URL absoluta lista para Postman
+        const absoluteApiUrl = `${window.location.origin}/api/feed?url=${encodeURIComponent(urlInput)}`;
+        document.getElementById('apiUrlOutput').value = absoluteApiUrl;
+
+      } catch (err) {
+        alert('Error al procesar el feed: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Procesar y Generar JSON';
+      }
+    });
+
+    document.getElementById('btnDownload').addEventListener('click', () => {
+      const blob = new Blob([jsonResultString], { type: 'application/json' });
+      const downloadUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      a.download = 'catalog_feed.json';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(downloadUrl);
+    });
+
+    document.getElementById('copyApiUrl').addEventListener('click', () => {
+      const input = document.getElementById('apiUrlOutput');
+      input.select();
+      navigator.clipboard.writeText(input.value);
+      alert('¡URL de la API copiada al portapapeles! Ya podés usarla en Postman o en tu bot.');
+    });
+
+    document.getElementById('btnCopyJson').addEventListener('click', () => {
+      navigator.clipboard.writeText(jsonResultString);
+      alert('JSON copiado al portapapeles.');
+    });
+  </script>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
