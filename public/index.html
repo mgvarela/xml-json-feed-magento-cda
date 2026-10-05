@@ -16,7 +16,6 @@
 </head>
 <body>
 
-  <!-- Notificaciones Toast -->
   <div class="toast-container position-fixed top-0 end-0 p-3">
     <div id="liveToast" class="toast align-items-center text-bg-success border-0 shadow" role="alert" aria-live="assertive" aria-atomic="true">
       <div class="d-flex">
@@ -26,7 +25,6 @@
     </div>
   </div>
 
-  <!-- Pantalla de Login -->
   <div id="loginScreen" class="container py-5" style="max-width: 450px; margin-top: 10vh;">
     <div class="card p-4 shadow-sm border-0">
       <div class="text-center mb-4">
@@ -44,7 +42,6 @@
     </div>
   </div>
 
-  <!-- Contenido Principal -->
   <div id="appContent" class="d-none">
     <div class="container py-5">
       <div class="row justify-content-center">
@@ -74,9 +71,16 @@
             <div class="p-3 bg-light border rounded-3 mb-3">
                 <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
                   <h6 class="fw-bold text-dark mb-0"><i class="bi bi-gear-fill text-primary me-1"></i> Endpoint Global Activo</h6>
-                  <button class="btn btn-primary btn-sm px-3 fw-semibold" type="button" id="btnProcess">
-                    <i class="bi bi-play-fill me-1"></i> Forzar Procesamiento / Refrescar
-                  </button>
+                  
+                  <div class="d-flex align-items-center gap-2">
+                    <select id="modeSelector" class="form-select form-select-sm">
+                      <option value="catalog">Modo Catálogo (Atributos completos)</option>
+                      <option value="pricing">Modo Pricing (Precios y Stock)</option>
+                    </select>
+                    <button class="btn btn-primary btn-sm px-3 fw-semibold text-nowrap" type="button" id="btnProcess">
+                      <i class="bi bi-play-fill me-1"></i> Procesar
+                    </button>
+                  </div>
                 </div>
                 
                 <div class="input-group mb-2">
@@ -87,12 +91,11 @@
                     </button>
                 </div>
                 <div class="d-flex justify-content-between text-muted small">
-                  <span>Total de productos unificados: <strong id="totalProductsCount">-</strong></span>
+                  <span>Total de productos: <strong id="totalProductsCount">-</strong></span>
                   <span>Última sincronización: <strong id="lastSyncTime">-</strong></span>
                 </div>
             </div>
 
-            <!-- Consola de Logs en Vivo -->
             <div class="mb-3">
               <label class="form-label fw-semibold text-secondary small text-uppercase"><i class="bi bi-terminal-fill me-1"></i> Log de Actividad en Vivo</label>
               <div class="log-console" id="logConsole">
@@ -102,7 +105,6 @@
 
           </div>
 
-          <!-- Vista Previa del JSON Global -->
           <div class="card p-4 d-none" id="previewCard">
             <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
               <h5 class="mb-0 fw-bold text-dark"><i class="bi bi-file-earmark-code me-2 text-primary"></i>Vista previa del JSON Global</h5>
@@ -193,13 +195,15 @@
     document.getElementById('btnProcess').addEventListener('click', async () => {
       showError(null);
       const btn = document.getElementById('btnProcess');
+      const selectedMode = document.getElementById('modeSelector').value;
+      
       btn.disabled = true;
-      btn.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span> Procesando Feeds...`;
+      btn.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span> Procesando ${selectedMode}...`;
 
-      logMessage('Iniciando llamada GET al servicio global de Vercel...', 'info');
+      logMessage(`Iniciando llamada GET al servicio (Modo: ${selectedMode})...`, 'info');
 
       try {
-        const response = await fetch('/api/feed', {
+        const response = await fetch(`/api/feed?mode=${selectedMode}`, {
           method: 'GET',
           headers: { 'Authorization': `Bearer ${API_TOKEN}` }
         });
@@ -207,7 +211,6 @@
         const result = await response.json();
         if (!result.success) throw new Error(result.error || 'Error en el servidor');
 
-        // Imprimir en consola de logs cada feed procesado por el backend
         if (result.feeds_processed && Array.isArray(result.feeds_processed)) {
           result.feeds_processed.forEach(feed => {
             if (feed.status === 'success') {
@@ -232,8 +235,8 @@
         badge.className = 'badge bg-success p-2 d-flex align-items-center';
         badge.innerHTML = `<i class="bi bi-circle-fill text-white me-1 small"></i> <span>Servicio Activo & Operativo</span>`;
 
-        logMessage(`Proceso finalizado con éxito. Total productos unificados: ${result.total_products}`, 'success');
-        showToast('¡Consolidación de feeds completada!');
+        logMessage(`Proceso finalizado con éxito (${selectedMode}). Productos: ${result.total_products}`, 'success');
+        showToast('¡Procesamiento completado!');
 
       } catch (err) {
         showError('Falla en la ejecución: ' + err.message);
@@ -242,7 +245,7 @@
         badge.innerHTML = `<i class="bi bi-circle-fill text-white me-1 small"></i> <span>Error de Conexión</span>`;
       } finally {
         btn.disabled = false;
-        btn.innerHTML = `<i class="bi bi-play-fill me-1"></i> Forzar Procesamiento / Refrescar`;
+        btn.innerHTML = `<i class="bi bi-play-fill me-1"></i> Procesar`;
       }
     });
 
@@ -250,9 +253,9 @@
       const blob = new Blob([jsonResultString], { type: 'application/json' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = 'catalog_feed_global.json';
+      a.download = `catalog_feed_${document.getElementById('modeSelector').value}.json`;
       a.click();
-      logMessage('Archivo JSON global descargado.', 'success');
+      logMessage('Archivo JSON descargado.', 'success');
       showToast('Archivo descargado.');
     });
 

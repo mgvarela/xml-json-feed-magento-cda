@@ -5,22 +5,17 @@ const GLOBAL_FEEDS = [
     'https://casadelaudio.com/media/feed/api_info_uke.xml',
 ];
 
-// Función auxiliar para limpiar CSS de Page Builder y etiquetas de estilo
 function cleanDescription(htmlText) {
     if (!htmlText || htmlText === 'null') return null;
-    // Eliminar bloques <style>...</style> y estilos inline de Page Builder
     let clean = htmlText.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
     clean = clean.replace(/#html-body\s*\[data-pb-style[^\]]*\]\s*\{[^}]*\}/gi, '');
-    // Remover tags HTML y dejar texto plano
     clean = clean.replace(/<[^>]*>?/gm, '');
     return clean.trim() !== '' ? clean.trim() : null;
 }
 
-// Función auxiliar para limpiar unidades duplicadas (ej: "32.5 cm cm" -> "32.5 cm")
 function sanitizeUnit(value, unit) {
     if (!value || value === 'null') return null;
     let strVal = String(value).trim();
-    // Quitar la unidad si ya la trae repetida
     strVal = strVal.replace(new RegExp(`\\s*${unit}\\s*${unit}`, 'gi'), ` ${unit}`);
     if (!strVal.toLowerCase().includes(unit.toLowerCase())) {
         strVal += ` ${unit}`;
@@ -55,11 +50,8 @@ module.exports = async (req, res) => {
             });
         }
 
-        // Parámetro para elegir el modo: ?mode=pricing (liviano) o ?mode=catalog (completo diario)
         const mode = req.query.mode || 'pricing'; 
-        // Parámetro opcional para filtro Delta (ej: ?since=2026-10-05T00:00:00Z)
         const sinceFilter = req.query.since ? new Date(req.query.since) : null;
-
         const targetCostosUrl = process.env.COSTOS_JSON_URL;
 
         const feedPromises = GLOBAL_FEEDS.map(url => 
@@ -76,7 +68,6 @@ module.exports = async (req, res) => {
         const costosData = targetCostosUrl ? (responses[responses.length - 1].data || []) : [];
         const xmlResponses = targetCostosUrl ? responses.slice(0, -1) : responses;
 
-        // Mapeo de costos y stock local (Fuente de verdad prioritaria)
         const costosMap = {};
         if (Array.isArray(costosData)) {
             costosData.forEach(item => {
@@ -110,18 +101,13 @@ module.exports = async (req, res) => {
                 const sku = prod.sku ? String(prod.sku).trim() : null;
                 const localData = (sku && costosMap[sku]) ? costosMap[sku] : { costo: null, stock: null };
 
-                // Validación de fecha real updated_at para filtro Delta
                 const prodUpdatedAt = prod.updated_at ? new Date(prod.updated_at) : new Date();
                 if (sinceFilter && prodUpdatedAt < sinceFilter) {
-                    return null; // Si no cambió y hay filtro Delta, lo omitimos
+                    return null; 
                 }
 
-                // Prioridad de stock: si el JSON local tiene stock definido, se prioriza frente al feed desfasado
                 const finalStock = localData.stock !== null ? localData.stock : (prod.logistica?.stock !== undefined ? Number(prod.logistica.stock) : 0);
 
-                // ==========================================
-                // MODO PRICING (Liviano - Cada 1 hora)
-                // ==========================================
                 if (mode === 'pricing') {
                     return {
                         sku: sku,
@@ -139,12 +125,7 @@ module.exports = async (req, res) => {
                     };
                 }
 
-                // ==========================================
-                // MODO CATALOGO (Completo - Madrugada / Delta)
-                // ==========================================
                 let atributosMap = {};
-
-                // Generales obligatorios si existen
                 if (prod.ean) atributosMap['ean'] = String(prod.ean).trim();
                 if (prod.modelo) atributosMap['modelo'] = String(prod.modelo).trim();
                 if (prod.color) atributosMap['color'] = String(prod.color).trim();
@@ -153,7 +134,6 @@ module.exports = async (req, res) => {
                 if (prod.profundidad_producto) atributosMap['profundidad'] = sanitizeUnit(prod.profundidad_producto, 'cm');
                 if (prod.peso) atributosMap['peso'] = sanitizeUnit(prod.peso, 'kg');
 
-                // Condicionales según categoría (solo viajan si tienen valor)
                 if (prod.litros_brutos) atributosMap['litros_brutos'] = `${prod.litros_brutos} L`;
                 if (prod.litros_netos) atributosMap['litros_netos'] = `${prod.litros_netos} L`;
                 if (prod.potencia_w) atributosMap['potencia'] = `${prod.potencia_w} W`;
@@ -184,7 +164,7 @@ module.exports = async (req, res) => {
                         imagenes: imagenesList.length > 0 ? imagenesList : null
                     }
                 };
-            }).filter(item => item !== null); // Limpiar nulos del filtro delta
+            }).filter(item => item !== null);
 
             processedProducts = processedProducts.concat(mappedItems);
         }
