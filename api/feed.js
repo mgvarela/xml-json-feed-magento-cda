@@ -61,40 +61,60 @@ module.exports = async (req, res) => {
             });
         }
 
-        // 5. Parsear XML
+        // 5. Parsear XML (Adaptado a la nueva estructura <catalog><product>...</product></catalog>)
         const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" });
         const jsonObj = parser.parse(xmlResponse.data);
 
-        let rawItems = jsonObj?.rss?.channel?.item || jsonObj?.elements || jsonObj?.catalog?.product || jsonObj?.item || [];
+        let rawItems = jsonObj?.catalog?.product || jsonObj?.rss?.channel?.item || jsonObj?.elements || jsonObj?.item || [];
         if (!Array.isArray(rawItems)) rawItems = [rawItems];
 
-        // 6. Normalizar y cruzar costos
+        // 6. Normalizar y cruzar costos según la nueva estructura de nodos
         const normalizedProducts = rawItems.map(prod => {
-            const sku = prod.sku || prod.g_id || prod.id ? String(prod.sku || prod.g_id || prod.id).trim() : null;
-            const costoFinal = (sku && costosMap[sku] !== undefined) ? costosMap[sku] : (prod.cost ? Number(prod.cost) : null);
+            const sku = prod.sku ? String(prod.sku).trim() : null;
+            const costoFinal = (sku && costosMap[sku] !== undefined) ? costosMap[sku] : null;
+
+            // Procesamiento de atributos dinámicos
+            let atributosMap = {};
+            if (prod.catalogo && prod.catalogo.atributos) {
+                let rawAtribs = prod.catalogo.atributos.atributo;
+                if (!Array.isArray(rawAtribs)) rawAtribs = [rawAtribs];
+                rawAtribs.forEach(atrib => {
+                    if (atrib && atrib.codigo && atrib.valor !== undefined) {
+                        atributosMap[atrib.codigo] = atrib.valor;
+                    }
+                });
+            }
+
+            // Procesamiento de imágenes múltiples
+            let imagenesList = [];
+            if (prod.catalogo && prod.catalogo.imagenes) {
+                let rawImgs = prod.catalogo.imagenes.imagen;
+                if (!Array.isArray(rawImgs)) rawImgs = [rawImgs];
+                imagenesList = rawImgs.filter(img => img && typeof img === 'string');
+            }
 
             return {
                 sku: sku,
-                nombre: prod.title || prod.name || prod.g_title || null,
-                marca: prod.brand || prod.g_brand || null,
-                categoria: prod.product_type || prod.category || null,
-                url: prod.link || prod.g_link || null,
-                habilitado: prod.status === '1' || prod.availability === 'in stock' ? true : null,
+                nombre: prod.nombre !== 'null' ? prod.nombre : null,
+                marca: prod.marca !== 'null' ? prod.marca : null,
+                categoria: prod.categoria !== 'null' ? prod.categoria : null,
+                url: prod.url || null,
+                habilitado: prod.habilitado === true || prod.habilitado === 'true',
                 updated_at: prod.updated_at || new Date().toISOString(),
                 pricing: {
-                    precio_lista: prod.price ? Number(prod.price) : null,
-                    precio_un_pago: prod.sale_price ? Number(prod.sale_price) : null,
-                    cuotas_sin_interes: prod.installments ? Number(prod.installments) : null
+                    precio_lista: prod.pricing?.precio_lista !== 'null' && prod.pricing?.precio_lista !== undefined ? Number(prod.pricing.precio_lista) : null,
+                    precio_un_pago: prod.pricing?.precio_un_pago !== 'null' && prod.pricing?.precio_un_pago !== undefined ? Number(prod.pricing.precio_un_pago) : null,
+                    cuotas_sin_interes: prod.pricing?.cuotas_sin_interes !== 'null' && prod.pricing?.cuotas_sin_interes !== undefined ? Number(prod.pricing.cuotas_sin_interes) : null
                 },
                 logistica: {
                     costo: costoFinal,
-                    stock: prod.stock !== undefined ? Number(prod.stock) : 0
+                    stock: prod.logistica?.stock !== undefined ? Number(prod.logistica.stock) : 0
                 },
                 catalogo: {
-                    descripcion_corta: prod.short_description || null,
-                    descripcion: prod.description || null,
-                    atributos: prod.attributes || null,
-                    imagenes: prod.image_link ? [prod.image_link] : null
+                    descripcion_corta: prod.catalogo?.descripcion_corta !== 'null' ? prod.catalogo.descripcion_corta : null,
+                    descripcion: prod.catalogo?.descripcion !== 'null' ? prod.catalogo.descripcion : null,
+                    atributos: atributosMap,
+                    imagenes: imagenesList.length > 0 ? imagenesList : null
                 }
             };
         });
