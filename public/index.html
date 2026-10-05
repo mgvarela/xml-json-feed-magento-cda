@@ -88,18 +88,17 @@
 
             <!-- Sección informativa amigable -->
             <div class="p-3 bg-light border rounded-3 mb-3">
-              <h6 class="fw-bold text-dark mb-1"><i class="bi bi-info-circle-fill text-primary me-1"></i> Estado y Caché de la API</h6>
-              <p class="small text-muted mb-2">Procesa el catálogo al vuelo con caché optimizada en Vercel de 1 hora e incluye validación por Token.</p>
-              
-              <div class="input-group mb-1">
-                <span class="input-group-text bg-white small">Endpoint Activo</span>
-                <input type="text" id="apiUrlOutput" class="form-control bg-white font-monospace small" readonly>
-                <button class="btn btn-outline-primary" type="button" id="copyApiUrl">
-                  <i class="bi bi-clipboard me-1"></i> Copiar URL
-                </button>
-              </div>
+                <h6 class="fw-bold text-dark mb-1"><i class="bi bi-info-circle-fill text-primary me-1"></i> Endpoint de Producción (Ultra Limpio)</h6>
+                <p class="small text-muted mb-2">Este endpoint no requiere parámetros en la URL. Toma el feed y los costos automáticamente desde Vercel y está protegido por Header.</p>
+                
+                <div class="input-group mb-1">
+                    <span class="input-group-text bg-white small">API Endpoint</span>
+                    <input type="text" id="apiUrlOutput" class="form-control bg-white font-monospace small" readonly>
+                    <button class="btn btn-outline-primary" type="button" id="copyApiUrl">
+                    <i class="bi bi-clipboard me-1"></i> Copiar URL
+                    </button>
+                </div>
             </div>
-          </div>
 
           <!-- Vista Previa -->
           <div class="card p-4 d-none" id="previewCard">
@@ -169,10 +168,9 @@
     }
 
         function updateEndpointUrl() {
-        const defaultXml = document.getElementById('xmlUrl').value.trim();
-        const fullUrl = `${window.location.origin}/api/feed?url=${encodeURIComponent(defaultXml)}`;
-        document.getElementById('apiUrlOutput').value = fullUrl;
-        }
+  const cleanUrl = `${window.location.origin}/api/feed`;
+  document.getElementById('apiUrlOutput').value = cleanUrl;
+}
 
     document.getElementById('xmlUrl').addEventListener('input', updateEndpointUrl);
 
