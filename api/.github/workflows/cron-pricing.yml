@@ -1,0 +1,17 @@
+name: Sincronizar Pricing (Cada 1 Hora)
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+jobs:
+  run-pricing:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Llamar API Pricing Vercel
+        env:
+          MY_SECRET_TOKEN: ${{ secrets.API_SECRET_TOKEN }}
+        run: |
+          curl -X GET "https://xml-json-feed-magento-7ajapw2fx.vercel.app/api/feed?mode=pricing" \
+          -H "Authorization: Bearer $MY_SECRET_TOKEN"
