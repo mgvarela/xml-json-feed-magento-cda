@@ -116,7 +116,6 @@
             </div>
             <pre><code id="jsonOutput"></code></pre>
           </div>
-
         </div>
       </div>
     </div>
@@ -191,8 +190,13 @@
       btn.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span> Procesando...`;
 
       try {
-        const apiCallUrl = `/api/feed?token=${API_TOKEN}&url=${encodeURIComponent(urlInput)}`;
-        const response = await fetch(apiCallUrl);
+       const apiCallUrl = `/api/feed?url=${encodeURIComponent(urlInput)}`;
+       const response = await fetch(apiCallUrl, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${API_TOKEN}` 
+            }
+       });
         const result = await response.json();
 
         if (!result.success) throw new Error(result.error || 'Error desconocido');
