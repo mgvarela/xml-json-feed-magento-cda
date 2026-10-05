@@ -275,13 +275,21 @@ async function writeSnapshot(snapshot) {
 
 // ---------- Auth ----------
 
+function safeEqual(a, b) {
+    const ha = crypto.createHash('sha256').update(String(a)).digest();
+    const hb = crypto.createHash('sha256').update(String(b)).digest();
+    return crypto.timingSafeEqual(ha, hb);
+}
+
+// Cliente/cron: Bearer con API_SECRET_TOKEN. Panel interno: x-panel-password con PANEL_PASSWORD
 function tokenValid(req) {
     const expected = process.env.API_SECRET_TOKEN;
     const header = req.headers.authorization;
-    if (!expected || !header || !header.startsWith('Bearer ')) return false;
-    const a = crypto.createHash('sha256').update(header.slice(7)).digest();
-    const b = crypto.createHash('sha256').update(expected).digest();
-    return crypto.timingSafeEqual(a, b);
+    if (expected && header && header.startsWith('Bearer ') && safeEqual(header.slice(7), expected)) return true;
+
+    const panelPw = process.env.PANEL_PASSWORD;
+    const sent = req.headers['x-panel-password'];
+    return !!(panelPw && sent && safeEqual(sent, panelPw));
 }
 
 const PRICING_PARTS = ['habilitado', 'pricing', 'logistica'];
@@ -310,6 +318,8 @@ module.exports = async (req, res) => {
         const query = req.query || Object.fromEntries(new URL(req.url, 'http://localhost').searchParams);
         const mode = query.mode;
         const wantFull = query.full === '1' || query.full === 'true';
+
+        if (mode === 'ping') return res.status(200).json({ success: true });
 
         // Sin mode: se sirve el JSON final almacenado (lo que consume el cliente)
         if (!mode) {

@@ -127,8 +127,8 @@
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script>
-    const MASTER_PASSWORD = "cda-magento-json-2026"; 
-    const API_TOKEN = "]h)04]{cbg2GnN346!9D"; 
+    // La contraseña se valida en el servidor (PANEL_PASSWORD en Vercel); el token de la API nunca llega al navegador
+    let panelPassword = sessionStorage.getItem('cda_panel_pw') || '';
     let jsonResultString = '';
 
     function logMessage(text, type = 'info') {
@@ -163,16 +163,20 @@
     }
 
     window.addEventListener('DOMContentLoaded', () => {
-      const isLogged = localStorage.getItem('cda_feed_auth');
-      if (isLogged === 'true') {
-        unlockApp();
-      }
+      if (panelPassword) unlockApp();
     });
 
-    document.getElementById('btnLogin').addEventListener('click', () => {
+    document.getElementById('btnLogin').addEventListener('click', async () => {
       const pass = document.getElementById('loginPassword').value;
-      if (pass === MASTER_PASSWORD) {
-        localStorage.setItem('cda_feed_auth', 'true');
+      let ok = false;
+      try {
+        const r = await fetch('/api/feed?mode=ping', { headers: { 'x-panel-password': pass } });
+        ok = r.ok;
+      } catch (e) { ok = false; }
+
+      if (ok) {
+        panelPassword = pass;
+        sessionStorage.setItem('cda_panel_pw', pass);
         unlockApp();
         logMessage('Acceso concedido al panel de control.', 'success');
       } else {
@@ -205,10 +209,11 @@
       try {
         const response = await fetch(`/api/feed?mode=${selectedMode}&full=1`, {
           method: 'GET',
-          headers: { 'Authorization': `Bearer ${API_TOKEN}` }
+          headers: { 'x-panel-password': panelPassword }
         });
 
         const result = await response.json();
+        if (response.status === 401) { sessionStorage.removeItem('cda_panel_pw'); panelPassword = ''; }
         if (!result.success) throw new Error(result.error || 'Error en el servidor');
 
         if (result.feeds_processed && Array.isArray(result.feeds_processed)) {
