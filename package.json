@@ -4,7 +4,7 @@
   "description": "API para convertir XML feed de Magento a JSON",
   "main": "api/feed.js",
   "engines": {
-    "node": "18.x"
+    "node": ">=18.x"
   },
   "dependencies": {
     "axios": "^1.6.8",
