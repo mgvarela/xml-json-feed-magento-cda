@@ -5,7 +5,7 @@ module.exports = async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    res.setHeader('Cache-Control', 's-maxage=3600, stale-while-revalidate');
+    res.setHeader('Cache-Control', 'public, s-maxage=3600, stale-while-revalidate');
 
     if (req.method === 'OPTIONS') {
         return res.status(200).end();
@@ -13,7 +13,6 @@ module.exports = async (req, res) => {
 
     try {
         const xmlUrl = req.query.url;
-
         if (!xmlUrl) {
             return res.status(400).json({ success: false, error: 'Falta el parámetro ?url=' });
         }
@@ -24,7 +23,7 @@ module.exports = async (req, res) => {
 
         return res.status(200).json({
             success: true,
-            updated_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(), // Marca de tiempo exacta de ejecución
             source_xml: xmlUrl,
             data: jsonObj
         });

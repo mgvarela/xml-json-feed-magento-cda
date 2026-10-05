@@ -31,13 +31,19 @@
         
         <!-- Tarjeta Principal -->
         <div class="card p-4 mb-4">
-          <div class="d-flex align-items-center mb-3">
-            <div class="bg-primary text-white p-2 rounded-3 me-3">
-              <i class="bi bi-code-slash fs-4"></i>
+          <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+            <div class="d-flex align-items-center">
+              <div class="bg-primary text-white p-2 rounded-3 me-3">
+                <i class="bi bi-code-slash fs-4"></i>
+              </div>
+              <div>
+                <h2 class="h4 mb-0 fw-bold text-dark">Conversor de Feed XML ➔ JSON & API</h2>
+                <p class="text-muted small mb-0">Automatización de Pricing - Casa del Audio</p>
+              </div>
             </div>
-            <div>
-              <h2 class="h4 mb-0 fw-bold text-dark">Conversor de Feed XML ➔ JSON & API</h2>
-              <p class="text-muted small mb-0">Automatización de Pricing - Casa del Audio</p>
+            <!-- Badge indicador de última actualización -->
+            <div id="lastUpdateBadge" class="badge bg-secondary text-light p-2 d-none align-items-center">
+              <i class="bi bi-clock-history me-1"></i> Última ejecución: <span id="updateTimeText" class="ms-1 fw-semibold">Nunca</span>
             </div>
           </div>
 
@@ -60,10 +66,10 @@
             <small class="text-muted">Podés cambiar esta URL en cualquier momento para procesar otro feed XML dinámicamente.</small>
           </div>
 
-          <!-- Sección informativa amigable sobre el funcionamiento y caché -->
+          <!-- Sección informativa amigable -->
           <div class="p-3 bg-light border rounded-3 mb-3">
             <h6 class="fw-bold text-dark mb-1"><i class="bi bi-info-circle-fill text-primary me-1"></i> Estado y Caché de la API</h6>
-            <p class="small text-muted mb-2">Esta app procesa 4,000+ productos al vuelo y cuenta con caché optimizada en Vercel (1 hora) para evitar sobrecargar Magento. El bot puede consumir el endpoint las veces que necesite de forma eficiente.</p>
+            <p class="small text-muted mb-2">Procesa 4,000+ productos al vuelo con caché optimizada en Vercel de 1 hora.</p>
             
             <div class="input-group mb-1">
               <span class="input-group-text bg-white small">Endpoint Activo</span>
@@ -75,7 +81,7 @@
           </div>
         </div>
 
-        <!-- Vista Previa y Análisis de Cambios (Diff) -->
+        <!-- Vista Previa -->
         <div class="card p-4 d-none" id="previewCard">
           <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
             <h5 class="mb-0 fw-bold text-dark"><i class="bi bi-file-earmark-code me-2 text-primary"></i>Vista previa del JSON</h5>
@@ -101,7 +107,7 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script>
     let jsonResultString = '';
-    let lastProcessedData = null; // Guardamos el estado anterior para comparar cambios
+    let lastProcessedData = null;
 
     function showToast(message, isError = false) {
       const toastEl = document.getElementById('liveToast');
@@ -121,11 +127,9 @@
       }
     }
 
-    // Inicializar URL por defecto en el input al cargar
     window.addEventListener('DOMContentLoaded', () => {
       const defaultXml = document.getElementById('xmlUrl').value.trim();
-      const absoluteApiUrl = `${window.location.origin}/api/feed?url=${encodeURIComponent(defaultXml)}`;
-      document.getElementById('apiUrlOutput').value = absoluteApiUrl;
+      document.getElementById('apiUrlOutput').value = `${window.location.origin}/api/feed?url=${encodeURIComponent(defaultXml)}`;
     });
 
     document.getElementById('btnProcess').addEventListener('click', async () => {
@@ -148,12 +152,23 @@
 
         if (!result.success) throw new Error(result.error);
 
-        lastProcessedData = result.data; // Guardamos para el diff
+        lastProcessedData = result.data;
         jsonResultString = JSON.stringify(result.data, null, 2);
         document.getElementById('jsonOutput').textContent = jsonResultString;
         
         document.getElementById('previewCard').classList.remove('d-none');
         document.getElementById('apiUrlOutput').value = `${window.location.origin}/api/feed?url=${encodeURIComponent(urlInput)}`;
+
+        // Actualizar el contador con la fecha devuelta por el servidor
+        if (result.updated_at) {
+          const dateObj = new Date(result.updated_at);
+          const timeFormatted = dateObj.toLocaleDateString() + ' ' + dateObj.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
+          
+          document.getElementById('updateTimeText').textContent = timeFormatted;
+          const badge = document.getElementById('lastUpdateBadge');
+          badge.classList.remove('d-none', 'bg-secondary');
+          badge.classList.add('bg-success');
+        }
 
         showToast('¡Feed XML convertido a JSON correctamente!');
       } catch (err) {
@@ -164,14 +179,11 @@
       }
     });
 
-    // Lógica para detectar cambios (Diff Engine simulado)
-    document.getElementById('btnDetectDiff',).addEventListener('click', () => {
+    document.getElementById('btnDetectDiff').addEventListener('click', () => {
       if (!lastProcessedData) return;
-      
-      showToast('Analizando cambios respecto al último estado...');
-      // Aquí el bot o la app puede comparar SKUs, precios o stock anterior vs actual.
+      showToast('Analizando cambios...');
       setTimeout(() => {
-        alert('Simulación de Control de Cambios (Diff):\n- Se detectaron 14 productos con modificación de precio.\n- 3 productos sin stock.\n- No hubo altas de SKUs nuevos.\n\nEn tu bot (ej. en n8n o Python), podés comparar el JSON anterior con el nuevo para actualizar solo lo modificado.');
+        alert('Simulación de Control de Cambios (Diff):\n- Se detectaron 14 productos con modificación de precio.\n- 3 productos sin stock.');
       }, 500);
     });
 
@@ -188,7 +200,7 @@
       const input = document.getElementById('apiUrlOutput');
       input.select();
       navigator.clipboard.writeText(input.value);
-      showToast('¡URL de la API copiada al portapapeles!');
+      showToast('¡URL de la API copiada!');
     });
 
     document.getElementById('btnCopyJson').addEventListener('click', () => {
