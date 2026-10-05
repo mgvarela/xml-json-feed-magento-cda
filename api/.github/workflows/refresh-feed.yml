@@ -1,0 +1,17 @@
+name: Refrescar Feed Global Vercel
+
+on:
+  schedule:
+    - cron: '0 * * * *' # Se ejecuta automáticamente cada 1 hora en punto
+  workflow_dispatch:     # Permite ejecutarlo manualmente desde la pestaña "Actions"
+
+jobs:
+  call-vercel-api:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Hacer request al endpoint de Vercel para regenerar caché
+        env:
+          MY_SECRET_TOKEN: ${{ secrets.API_SECRET_TOKEN }}
+        run: |
+          curl -X GET "https://xml-json-feed-magento-7ajapw2fx.vercel.app/api/feed" \
+          -H "Authorization: Bearer $MY_SECRET_TOKEN"
