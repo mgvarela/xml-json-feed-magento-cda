@@ -1,0 +1,6 @@
+{
+  "version": 2,
+  "rewrites": [
+    { "source": "/api/feed", "destination": "/api/feed" }
+  ]
+}
