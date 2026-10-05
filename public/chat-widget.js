@@ -1,11 +1,11 @@
 (function () {
-    // URL base de tu app en Vercel (detecta automáticamente el dominio activo)
     const VERCEL_DOMAIN = "https://xml-json-feed-magento-cda.vercel.app";
     const API_FEED_URL = `${VERCEL_DOMAIN}/api/feed?url=https%3A%2F%2Fcasadelaudio.com%2Fmedia%2Ffeed%2Ffeed-magento.xml`;
 
     let catalogCache = null;
+    let lastFoundProducts = []; // Memoria conversacional de los últimos productos mostrados
 
-    // 1. Inyectar Estilos CSS del Chat
+    // Estilos CSS del Chat (Diseño moderno y limpio)
     const style = document.createElement('style');
     style.innerHTML = `
         #cda-chat-container {
@@ -20,7 +20,7 @@
         }
         #cda-chat-btn:hover { transform: scale(1.05); }
         #cda-chat-window {
-            display: none; width: 350px; height: 480px; background: white;
+            display: none; width: 360px; height: 500px; background: white;
             border-radius: 14px; box-shadow: 0 10px 30px rgba(0,0,0,0.2);
             margin-bottom: 12px; overflow: hidden; border: 1px solid #dee2e6;
             display: flex; flex-direction: column;
@@ -36,7 +36,7 @@
             flex: 1; padding: 15px; overflow-y: auto; background: #f8f9fa; display: flex; flex-direction: column; gap: 10px;
         }
         .cda-msg {
-            max-width: 80%; padding: 10px 14px; border-radius: 12px; font-size: 13px; line-height: 1.4;
+            max-width: 85%; padding: 10px 14px; border-radius: 12px; font-size: 13px; line-height: 1.4;
         }
         .cda-msg-bot {
             background: white; color: #212529; align-self: flex-start; border: 1px solid #e9ecef; box-shadow: 0 2px 5px rgba(0,0,0,0.02);
@@ -56,7 +56,7 @@
     `;
     document.head.appendChild(style);
 
-    // 2. Inyectar Estructura HTML del Chat
+    // Estructura HTML del Chat
     const chatContainer = document.createElement('div');
     chatContainer.id = 'cda-chat-container';
     chatContainer.innerHTML = `
@@ -67,11 +67,11 @@
             </div>
             <div id="cda-chat-messages">
                 <div class="cda-msg cda-msg-bot">
-                    ¡Hola! 👋 Soy el asistente virtual de Casa del Audio. ¿En qué producto, precio o stock te puedo ayudar hoy?
+                    ¡Hola! 👋 Soy tu asistente virtual de Casa del Audio. ¿Qué producto estás buscando hoy?
                 </div>
             </div>
             <div id="cda-chat-input-area">
-                <input type="text" id="cda-chat-input" placeholder="Ej: ¿Tienen stock de heladeras?" />
+                <input type="text" id="cda-chat-input" placeholder="Ej: Busco heladera No Frost..." />
                 <button id="cda-chat-send">Enviar</button>
             </div>
         </div>
@@ -79,7 +79,6 @@
     `;
     document.body.appendChild(chatContainer);
 
-    // 3. Lógica de Interacción
     const chatBtn = document.getElementById('cda-chat-btn');
     const chatWindow = document.getElementById('cda-chat-window');
     const chatClose = document.getElementById('cda-chat-close');
@@ -111,17 +110,16 @@
         appendMessage(query, 'user');
         chatInput.value = '';
         
-        // Indicador de "escribiendo..."
         const typingId = 'typing-' + Date.now();
         const typingDiv = document.createElement('div');
         typingDiv.id = typingId;
         typingDiv.className = 'cda-msg cda-msg-bot';
-        typingDiv.innerHTML = '<i>Buscando información...</i>';
+        typingDiv.innerHTML = '<i>Buscando en el catálogo...</i>';
         chatMessages.appendChild(typingDiv);
         chatMessages.scrollTop = chatMessages.scrollHeight;
 
         try {
-            // Descargar o usar caché del catálogo de Vercel
+            // Carga optimizada: descarga el catálogo una sola vez y lo guarda en RAM
             if (!catalogCache) {
                 const response = await fetch(API_FEED_URL);
                 const json = await response.json();
@@ -132,34 +130,44 @@
             let items = catalogCache?.rss?.channel?.item || catalogCache?.elements || catalogCache?.item || [];
             if (!Array.isArray(items)) items = [items];
 
-            // Buscar coincidencias con lo que preguntó el usuario
             const queryLower = query.toLowerCase();
-            const matches = items.filter(prod => {
-                const prodStr = JSON.stringify(prod).toLowerCase();
-                return prodStr.includes(queryLower);
-            }).slice(0, 3); // Top 3 resultados
+
+            // Detectar si el usuario hace una pregunta de seguimiento conversacional (ej: "más barato", "el primero", "detalles")
+            let matches = [];
+            if ((queryLower.includes('este') || queryLower.includes('el primero') || queryLower.includes('precio') || queryLower.includes('mas info')) && lastFoundProducts.length > 0) {
+                // Usa la memoria del último producto consultado
+                matches = [lastFoundProducts[0]];
+            } else {
+                // Búsqueda normal en todo el catálogo
+                matches = items.filter(prod => {
+                    const prodStr = JSON.stringify(prod).toLowerCase();
+                    return prodStr.includes(queryLower);
+                }).slice(0, 3);
+            }
 
             document.getElementById(typingId).remove();
 
             if (matches.length === 0) {
-                appendMessage(`No encontré productos específicos para "<b>${query}</b>". Podés consultarnos por WhatsApp o revisar las categorías principales de la tienda.`, 'bot');
+                appendMessage(`No encontré resultados exactos para "<b>${query}</b>". Probá ingresando otra marca o tipo de producto.`, 'bot');
                 return;
             }
 
+            lastFoundProducts = matches; // Guardamos en memoria conversacional
+
             let botResponse = `Encontré estas opciones para vos:<br><br>`;
-            matches.forEach(prod => {
+            matches.forEach((prod, index) => {
                 const name = prod.title || prod.name || prod.g_title || 'Producto';
                 const price = prod.price || prod.g_price || 'Consultar';
                 const link = prod.link || prod.g_link || '#';
                 
-                botResponse += `📦 <b>${name}</b><br>💰 Precio: $${price}<br><a href="${link}" target="_blank" style="color:#0d6efd;">Ver producto en tienda</a><br><hr style="margin:6px 0;">`;
+                botResponse += `<b>${index + 1}. ${name}</b><br>💰 Precio: $${price}<br><a href="${link}" target="_blank" style="color:#0d6efd; font-weight:bold;">🔗 Ver en la tienda</a><br><hr style="margin:6px 0;">`;
             });
 
             appendMessage(botResponse, 'bot');
 
         } catch (err) {
             document.getElementById(typingId)?.remove();
-            appendMessage('Disculpà, ocurrió un error al consultar el catálogo en este momento.', 'bot');
+            appendMessage('Disculpá, ocurrió un error temporal al procesar tu consulta.', 'bot');
         }
     }
 

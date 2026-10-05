@@ -1,39 +1,18 @@
 <!DOCTYPE html>
 <html lang="es">
-
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Feed XML to JSON - Casa del Audio</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
-    <style>
-        body {
-            background-color: #f4f6f9;
-        }
-
-        .card {
-            border-radius: 12px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-            border: none;
-        }
-
-        pre {
-            background: #212529;
-            color: #f8f9fa;
-            padding: 15px;
-            border-radius: 8px;
-            max-height: 350px;
-            overflow-y: auto;
-            font-size: 13px;
-        }
-
-        .toast-container {
-            z-index: 1055;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Feed XML to JSON - Casa del Audio</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
+  <style>
+    body { background-color: #f4f6f9; }
+    .card { border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); border: none; }
+    pre { background: #212529; color: #f8f9fa; padding: 15px; border-radius: 8px; max-height: 350px; overflow-y: auto; font-size: 13px; }
+    .toast-container { z-index: 1055; }
+  </style>
 </head>
-
 <body>
 
   <!-- Notificaciones Toast -->
@@ -64,7 +43,7 @@
     </div>
   </div>
 
-  <!-- Contenido Principal (Oculto inicialmente por la clase d-none) -->
+  <!-- Contenido Principal (Oculto inicialmente) -->
   <div id="appContent" class="d-none">
     <div class="container py-5">
       <div class="row justify-content-center">
@@ -110,7 +89,7 @@
             <!-- Sección informativa amigable -->
             <div class="p-3 bg-light border rounded-3 mb-3">
               <h6 class="fw-bold text-dark mb-1"><i class="bi bi-info-circle-fill text-primary me-1"></i> Estado y Caché de la API</h6>
-              <p class="small text-muted mb-2">Procesa 4,000+ productos al vuelo con caché optimizada en Vercel de 1 hora.</p>
+              <p class="small text-muted mb-2">Procesa el catálogo al vuelo con caché optimizada en Vercel de 1 hora e incluye validación por Token.</p>
               
               <div class="input-group mb-1">
                 <span class="input-group-text bg-white small">Endpoint Activo</span>
@@ -127,9 +106,6 @@
             <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
               <h5 class="mb-0 fw-bold text-dark"><i class="bi bi-file-earmark-code me-2 text-primary"></i>Vista previa del JSON</h5>
               <div class="d-flex gap-2">
-                <button id="btnDetectDiff" class="btn btn-warning btn-sm fw-semibold text-dark">
-                  <i class="bi bi-arrow-left-right me-1"></i> Simular Detectar Cambios
-                </button>
                 <button id="btnDownload" class="btn btn-success btn-sm fw-semibold">
                   <i class="bi bi-download me-1"></i> Descargar .json
                 </button>
@@ -148,9 +124,9 @@
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script>
-    const MASTER_PASSWORD = "cda-magento-json-2026"; // Contraseña de acceso
+    const MASTER_PASSWORD = "cda-magento-json-2026"; 
+    const API_TOKEN = "]h)04]{cbg2GnN346!9D"; 
     let jsonResultString = '';
-    let lastProcessedData = null;
 
     function showToast(message, isError = false) {
       const toastEl = document.getElementById('liveToast');
@@ -170,7 +146,6 @@
       }
     }
 
-    // Lógica de Login
     window.addEventListener('DOMContentLoaded', () => {
       const isLogged = localStorage.getItem('cda_feed_auth');
       if (isLogged === 'true') {
@@ -191,10 +166,16 @@
     function unlockApp() {
       document.getElementById('loginScreen').classList.add('d-none');
       document.getElementById('appContent').classList.remove('d-none');
-      
-      const defaultXml = document.getElementById('xmlUrl').value.trim();
-      document.getElementById('apiUrlOutput').value = `${window.location.origin}/api/feed?url=${encodeURIComponent(defaultXml)}`;
+      updateEndpointUrl();
     }
+
+    function updateEndpointUrl() {
+      const defaultXml = document.getElementById('xmlUrl').value.trim();
+      const fullUrl = `${window.location.origin}/api/feed?token=${API_TOKEN}&url=${encodeURIComponent(defaultXml)}`;
+      document.getElementById('apiUrlOutput').value = fullUrl;
+    }
+
+    document.getElementById('xmlUrl').addEventListener('input', updateEndpointUrl);
 
     document.getElementById('btnProcess').addEventListener('click', async () => {
       const urlInput = document.getElementById('xmlUrl').value.trim();
@@ -210,21 +191,20 @@
       btn.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span> Procesando...`;
 
       try {
-        const apiCallUrl = `/api/feed?url=${encodeURIComponent(urlInput)}`;
+        const apiCallUrl = `/api/feed?token=${API_TOKEN}&url=${encodeURIComponent(urlInput)}`;
         const response = await fetch(apiCallUrl);
         const result = await response.json();
 
-        if (!result.success) throw new Error(result.error);
+        if (!result.success) throw new Error(result.error || 'Error desconocido');
 
-        lastProcessedData = result.data;
-        jsonResultString = JSON.stringify(result.data, null, 2);
+        jsonResultString = JSON.stringify(result, null, 2);
         document.getElementById('jsonOutput').textContent = jsonResultString;
         
         document.getElementById('previewCard').classList.remove('d-none');
-        document.getElementById('apiUrlOutput').value = `${window.location.origin}/api/feed?url=${encodeURIComponent(urlInput)}`;
+        updateEndpointUrl();
 
-        if (result.updated_at) {
-          const dateObj = new Date(result.updated_at);
+        if (result.generated_at) {
+          const dateObj = new Date(result.generated_at);
           const timeFormatted = dateObj.toLocaleDateString() + ' ' + dateObj.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
           
           document.getElementById('updateTimeText').textContent = timeFormatted;
@@ -233,21 +213,13 @@
           badge.classList.add('bg-success');
         }
 
-        showToast('¡Feed XML convertido a JSON correctamente!');
+        showToast('¡Feed XML convertido y validado correctamente!');
       } catch (err) {
         showError('Error al procesar: ' + err.message);
       } finally {
         btn.disabled = false;
         btn.innerHTML = `<i class="bi bi-gear-fill me-1"></i> Procesar`;
       }
-    });
-
-    document.getElementById('btnDetectDiff').addEventListener('click', () => {
-      if (!lastProcessedData) return;
-      showToast('Analizando cambios...');
-      setTimeout(() => {
-        alert('Simulación de Control de Cambios (Diff):\n- Se detectaron 14 productos con modificación de precio.\n- 3 productos sin stock.');
-      }, 500);
     });
 
     document.getElementById('btnDownload').addEventListener('click', () => {
@@ -263,7 +235,7 @@
       const input = document.getElementById('apiUrlOutput');
       input.select();
       navigator.clipboard.writeText(input.value);
-      showToast('¡URL de la API copiada!');
+      showToast('¡URL de la API con token copiada!');
     });
 
     document.getElementById('btnCopyJson').addEventListener('click', () => {
@@ -272,6 +244,4 @@
     });
   </script>
 </body>
-</html>
-
 </html>
