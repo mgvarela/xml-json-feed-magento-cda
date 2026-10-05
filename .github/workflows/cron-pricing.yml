@@ -17,5 +17,5 @@ jobs:
         env:
           MY_SECRET_TOKEN: ${{ secrets.API_SECRET_TOKEN }}
         run: |
-          curl -fsS --max-time 120 -X GET "https://xml-json-feed-magento-7ajapw2fx.vercel.app/api/feed?mode=pricing" \
+          curl -fsS --max-time 120 -X GET "https://xml-json-feed-magento-cda.vercel.app/api/feed?mode=pricing" \
           -H "Authorization: Bearer $MY_SECRET_TOKEN"
