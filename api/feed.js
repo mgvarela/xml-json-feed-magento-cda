@@ -1,16 +1,14 @@
 const axios = require('axios');
 const { XMLParser } = require('fast-xml-parser');
 
-// 1. Listado de todos los feeds por categoría que querés unificar en el JSON global
+// Listado centralizado de feeds por categoría
 const GLOBAL_FEEDS = [
     'https://casadelaudio.com/media/feed/api_info_uke.xml',
-    // Acá podés sumar las demás categorías cuando las generes en Magento:
     // 'https://casadelaudio.com/media/feed/api_info_electro.xml',
     // 'https://casadelaudio.com/media/feed/api_info_tecno.xml'
 ];
 
 module.exports = async (req, res) => {
-    // Headers de caché horaria en Vercel y CORS
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -21,7 +19,6 @@ module.exports = async (req, res) => {
     }
 
     try {
-        // 2. Validar Token por Header (Authorization: Bearer)
         const authHeader = req.headers.authorization;
         const SERVER_TOKEN = process.env.API_SECRET_TOKEN;
 
@@ -40,9 +37,11 @@ module.exports = async (req, res) => {
 
         const targetCostosUrl = process.env.COSTOS_JSON_URL;
 
-        // 3. Preparar peticiones en paralelo: Descargar TODOS los XMLs de las categorías + Costos locales
+        // Descarga concurrente de feeds y costos
         const feedPromises = GLOBAL_FEEDS.map(url => 
-            axios.get(url, { responseType: 'text', timeout: 25000 }).catch(err => ({ error: true, message: err.message }))
+            axios.get(url, { responseType: 'text', timeout: 25000 })
+                 .then(response => ({ url, data: response.data, error: false }))
+                 .catch(err => ({ url, error: true, message: err.message }))
         );
 
         if (targetCostosUrl) {
@@ -51,11 +50,9 @@ module.exports = async (req, res) => {
 
         const responses = await Promise.all(feedPromises);
         
-        // Separar costos (último elemento si existía targetCostosUrl, o array vacío)
         const costosData = targetCostosUrl ? (responses[responses.length - 1].data || []) : [];
         const xmlResponses = targetCostosUrl ? responses.slice(0, -1) : responses;
 
-        // 4. Mapear costos por SKU para cruce rápido en memoria $O(1)$
         const costosMap = {};
         if (Array.isArray(costosData)) {
             costosData.forEach(item => {
@@ -67,10 +64,15 @@ module.exports = async (req, res) => {
 
         const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" });
         let allNormalizedProducts = [];
+        let processedFeedsList = [];
 
-        // 5. Procesar cada XML de categoría y unificar en un solo gran array
         for (const xmlRes of xmlResponses) {
-            if (xmlRes.error) continue; // Si un feed falla, salta al siguiente sin romper el global
+            if (xmlRes.error) {
+                processedFeedsList.push({ url: xmlRes.url, status: 'error', message: xmlRes.message });
+                continue;
+            }
+
+            processedFeedsList.push({ url: xmlRes.url, status: 'success' });
 
             const jsonObj = parser.parse(xmlRes.data);
             let rawItems = jsonObj?.catalog?.product || jsonObj?.rss?.channel?.item || jsonObj?.elements || jsonObj?.item || [];
@@ -130,7 +132,7 @@ module.exports = async (req, res) => {
         return res.status(200).json({
             generated_at: new Date().toISOString(),
             success: true,
-            total_feeds_processed: xmlResponses.filter(r => !r.error).length,
+            feeds_processed: processedFeedsList,
             total_products: allNormalizedProducts.length,
             products: allNormalizedProducts
         });
