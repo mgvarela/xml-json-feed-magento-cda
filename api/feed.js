@@ -29,8 +29,8 @@ module.exports = async (req, res) => {
             });
         }
 
-        // 2. Obtener la URL del XML desde la variable de entorno (o por query si se envía explícitamente)
-        const xmlUrl = req.query.url || process.env.MAGENTO_XML_URL;
+        // 2. Obtener la URL del XML (por defecto apunta al nuevo feed de Uke)
+        const xmlUrl = req.query.url || process.env.MAGENTO_XML_URL || 'https://casadelaudio.com/media/feed/api_info_uke.xml';
         const targetCostosUrl = process.env.COSTOS_JSON_URL;
 
         if (!xmlUrl) {

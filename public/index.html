@@ -43,7 +43,7 @@
     </div>
   </div>
 
-  <!-- Contenido Principal (Oculto inicialmente) -->
+  <!-- Contenido Principal -->
   <div id="appContent" class="d-none">
     <div class="container py-5">
       <div class="row justify-content-center">
@@ -61,7 +61,6 @@
                   <p class="text-muted small mb-0">Automatización de Pricing - Casa del Audio</p>
                 </div>
               </div>
-              <!-- Badge indicador de última actualización -->
               <div id="lastUpdateBadge" class="badge bg-secondary text-light p-2 d-none align-items-center">
                 <i class="bi bi-clock-history me-1"></i> Última ejecución: <span id="updateTimeText" class="ms-1 fw-semibold">Nunca</span>
               </div>
@@ -78,18 +77,18 @@
               <label for="xmlUrl" class="form-label fw-semibold text-secondary small text-uppercase">URL del Feed XML (Magento)</label>
               <div class="input-group">
                 <span class="input-group-text bg-light"><i class="bi bi-link-45deg"></i></span>
-                <input type="url" id="xmlUrl" class="form-control" value="https://casadelaudio.com/media/feed/feed-magento.xml" placeholder="https://tu-tienda.com/media/feeds/catalog.xml">
+                <input type="url" id="xmlUrl" class="form-control" value="https://casadelaudio.com/media/feed/api_info_uke.xml" placeholder="https://casadelaudio.com/media/feed/api_info_uke.xml">
                 <button class="btn btn-primary px-4 fw-semibold" type="button" id="btnProcess">
                   <i class="bi bi-gear-fill me-1"></i> Procesar
                 </button>
               </div>
-              <small class="text-muted">Podés cambiar esta URL en cualquier momento para procesar otro feed XML dinámicamente.</small>
+              <small class="text-muted">Nuevo feed de Uke configurado por defecto.</small>
             </div>
 
-            <!-- Sección informativa amigable -->
+            <!-- Sección informativa del Endpoint -->
             <div class="p-3 bg-light border rounded-3 mb-3">
-                <h6 class="fw-bold text-dark mb-1"><i class="bi bi-info-circle-fill text-primary me-1"></i> Endpoint de Producción (Ultra Limpio)</h6>
-                <p class="small text-muted mb-2">Este endpoint no requiere parámetros en la URL. Toma el feed y los costos automáticamente desde Vercel y está protegido por Header.</p>
+                <h6 class="fw-bold text-dark mb-1"><i class="bi bi-info-circle-fill text-primary me-1"></i> Endpoint de Producción (Para Postman)</h6>
+                <p class="small text-muted mb-2">Usá esta URL en Postman enviando el header <code class="text-danger">Authorization: Bearer [tu_token]</code>.</p>
                 
                 <div class="input-group mb-1">
                     <span class="input-group-text bg-white small">API Endpoint</span>
@@ -99,8 +98,9 @@
                     </button>
                 </div>
             </div>
+          </div>
 
-          <!-- Vista Previa -->
+          <!-- Vista Previa (Abajo) -->
           <div class="card p-4 d-none" id="previewCard">
             <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
               <h5 class="mb-0 fw-bold text-dark"><i class="bi bi-file-earmark-code me-2 text-primary"></i>Vista previa del JSON</h5>
@@ -115,6 +115,7 @@
             </div>
             <pre><code id="jsonOutput"></code></pre>
           </div>
+
         </div>
       </div>
     </div>
@@ -167,10 +168,11 @@
       updateEndpointUrl();
     }
 
-        function updateEndpointUrl() {
-  const cleanUrl = `${window.location.origin}/api/feed`;
-  document.getElementById('apiUrlOutput').value = cleanUrl;
-}
+    function updateEndpointUrl() {
+      const urlInput = document.getElementById('xmlUrl').value.trim();
+      const cleanUrl = `${window.location.origin}/api/feed?url=${encodeURIComponent(urlInput)}`;
+      document.getElementById('apiUrlOutput').value = cleanUrl;
+    }
 
     document.getElementById('xmlUrl').addEventListener('input', updateEndpointUrl);
 
@@ -190,10 +192,10 @@
       try {
         const apiCallUrl = `/api/feed?url=${encodeURIComponent(urlInput)}`;
         const response = await fetch(apiCallUrl, {
-        method: 'GET',
-        headers: {
-            'Authorization': `Bearer ${API_TOKEN}` // El token viaja protegido acá adentro
-        }
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${API_TOKEN}`
+          }
         });
         const result = await response.json();
 
@@ -228,7 +230,7 @@
       const blob = new Blob([jsonResultString], { type: 'application/json' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = 'catalog_feed.json';
+      a.download = 'catalog_feed_uke.json';
       a.click();
       showToast('Archivo descargado.');
     });
