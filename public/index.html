@@ -36,264 +36,242 @@
 
 <body>
 
-    <!-- Pantalla de Login (Se oculta al autenticarse) -->
-    <div id="loginScreen" class="container py-5" style="max-width: 450px; margin-top: 10vh;">
-        <div class="card p-4 shadow-sm border-0">
-            <div class="text-center mb-4">
-                <div class="bg-primary text-white p-3 rounded-circle d-inline-block mb-2">
-                    <i class="bi bi-shield-lock-fill fs-3"></i>
-                </div>
-                <h3 class="fw-bold text-dark">Acceso Restringido</h3>
-                <p class="text-muted small">Ingresá la contraseña de Casa del Audio para acceder al conversor de feeds.
-                </p>
-            </div>
-            <div class="mb-3">
-                <input type="password" id="loginPassword" class="form-control" placeholder="Contraseña de acceso">
-            </div>
-            <button id="btnLogin" class="btn btn-primary w-100 fw-semibold">Ingresar</button>
-            <div id="loginError" class="text-danger small text-center mt-2 d-none">Contraseña incorrecta.</div>
+  <!-- Notificaciones Toast -->
+  <div class="toast-container position-fixed top-0 end-0 p-3">
+    <div id="liveToast" class="toast align-items-center text-bg-success border-0 shadow" role="alert" aria-live="assertive" aria-atomic="true">
+      <div class="d-flex">
+        <div class="toast-body" id="toastMessage">¡Operación exitosa!</div>
+        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pantalla de Login -->
+  <div id="loginScreen" class="container py-5" style="max-width: 450px; margin-top: 10vh;">
+    <div class="card p-4 shadow-sm border-0">
+      <div class="text-center mb-4">
+        <div class="bg-primary text-white p-3 rounded-circle d-inline-block mb-2">
+          <i class="bi bi-shield-lock-fill fs-3"></i>
         </div>
+        <h3 class="fw-bold text-dark">Acceso Restringido</h3>
+        <p class="text-muted small">Ingresá la contraseña de Casa del Audio para acceder al conversor de feeds.</p>
+      </div>
+      <div class="mb-3">
+        <input type="password" id="loginPassword" class="form-control" placeholder="Contraseña de acceso">
+      </div>
+      <button id="btnLogin" class="btn btn-primary w-100 fw-semibold">Ingresar</button>
+      <div id="loginError" class="text-danger small text-center mt-2 d-none">Contraseña incorrecta.</div>
     </div>
+  </div>
 
-    <!-- Contenido Principal de la App (Oculto por defecto hasta loguearse) -->
-    <div id="appContent" class="d-none">
-        <!-- Todo el contenido anterior de la app va acá -->
-    </div>
-
-    <!-- Notificaciones Toast -->
-    <div class="toast-container position-fixed top-0 end-0 p-3">
-        <div id="liveToast" class="toast align-items-center text-bg-success border-0 shadow" role="alert"
-            aria-live="assertive" aria-atomic="true">
-            <div class="d-flex">
-                <div class="toast-body" id="toastMessage">¡Operación exitosa!</div>
-                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"
-                    aria-label="Close"></button>
-            </div>
-        </div>
-    </div>
-
+  <!-- Contenido Principal (Oculto inicialmente por la clase d-none) -->
+  <div id="appContent" class="d-none">
     <div class="container py-5">
-        <div class="row justify-content-center">
-            <div class="col-lg-10">
-
-                <!-- Tarjeta Principal -->
-                <div class="card p-4 mb-4">
-                    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
-                        <div class="d-flex align-items-center">
-                            <div class="bg-primary text-white p-2 rounded-3 me-3">
-                                <i class="bi bi-code-slash fs-4"></i>
-                            </div>
-                            <div>
-                                <h2 class="h4 mb-0 fw-bold text-dark">Conversor de Feed XML ➔ JSON & API</h2>
-                                <p class="text-muted small mb-0">Automatización de Pricing - Casa del Audio</p>
-                            </div>
-                        </div>
-                        <!-- Badge indicador de última actualización -->
-                        <div id="lastUpdateBadge" class="badge bg-secondary text-light p-2 d-none align-items-center">
-                            <i class="bi bi-clock-history me-1"></i> Última ejecución: <span id="updateTimeText"
-                                class="ms-1 fw-semibold">Nunca</span>
-                        </div>
-                    </div>
-
-                    <!-- Alerta de Error UI -->
-                    <div id="errorAlert" class="alert alert-danger d-none align-items-center mb-3" role="alert">
-                        <i class="bi bi-exclamation-triangle-fill me-2"></i>
-                        <div id="errorMessage">Ocurrió un error.</div>
-                    </div>
-
-                    <!-- Input Dinámico de URL -->
-                    <div class="mb-3">
-                        <label for="xmlUrl" class="form-label fw-semibold text-secondary small text-uppercase">URL del
-                            Feed XML (Magento)</label>
-                        <div class="input-group">
-                            <span class="input-group-text bg-light"><i class="bi bi-link-45deg"></i></span>
-                            <input type="url" id="xmlUrl" class="form-control"
-                                value="https://casadelaudio.com/media/feed/feed-magento.xml"
-                                placeholder="https://tu-tienda.com/media/feeds/catalog.xml">
-                            <button class="btn btn-primary px-4 fw-semibold" type="button" id="btnProcess">
-                                <i class="bi bi-gear-fill me-1"></i> Procesar
-                            </button>
-                        </div>
-                        <small class="text-muted">Podés cambiar esta URL en cualquier momento para procesar otro feed
-                            XML dinámicamente.</small>
-                    </div>
-
-                    <!-- Sección informativa amigable -->
-                    <div class="p-3 bg-light border rounded-3 mb-3">
-                        <h6 class="fw-bold text-dark mb-1"><i class="bi bi-info-circle-fill text-primary me-1"></i>
-                            Estado y Caché de la API</h6>
-                        <p class="small text-muted mb-2">Procesa 4,000+ productos al vuelo con caché optimizada en
-                            Vercel de 1 hora.</p>
-
-                        <div class="input-group mb-1">
-                            <span class="input-group-text bg-white small">Endpoint Activo</span>
-                            <input type="text" id="apiUrlOutput" class="form-control bg-white font-monospace small"
-                                readonly>
-                            <button class="btn btn-outline-primary" type="button" id="copyApiUrl">
-                                <i class="bi bi-clipboard me-1"></i> Copiar URL
-                            </button>
-                        </div>
-                    </div>
+      <div class="row justify-content-center">
+        <div class="col-lg-10">
+          
+          <!-- Tarjeta Principal -->
+          <div class="card p-4 mb-4">
+            <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+              <div class="d-flex align-items-center">
+                <div class="bg-primary text-white p-2 rounded-3 me-3">
+                  <i class="bi bi-code-slash fs-4"></i>
                 </div>
-
-                <!-- Vista Previa -->
-                <div class="card p-4 d-none" id="previewCard">
-                    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-                        <h5 class="mb-0 fw-bold text-dark"><i
-                                class="bi bi-file-earmark-code me-2 text-primary"></i>Vista previa del JSON</h5>
-                        <div class="d-flex gap-2">
-                            <button id="btnDetectDiff" class="btn btn-warning btn-sm fw-semibold text-dark">
-                                <i class="bi bi-arrow-left-right me-1"></i> Simular Detectar Cambios
-                            </button>
-                            <button id="btnDownload" class="btn btn-success btn-sm fw-semibold">
-                                <i class="bi bi-download me-1"></i> Descargar .json
-                            </button>
-                            <button id="btnCopyJson" class="btn btn-outline-secondary btn-sm fw-semibold">
-                                <i class="bi bi-clipboard me-1"></i> Copiar
-                            </button>
-                        </div>
-                    </div>
-                    <pre><code id="jsonOutput"></code></pre>
+                <div>
+                  <h2 class="h4 mb-0 fw-bold text-dark">Conversor de Feed XML ➔ JSON & API</h2>
+                  <p class="text-muted small mb-0">Automatización de Pricing - Casa del Audio</p>
                 </div>
-
+              </div>
+              <!-- Badge indicador de última actualización -->
+              <div id="lastUpdateBadge" class="badge bg-secondary text-light p-2 d-none align-items-center">
+                <i class="bi bi-clock-history me-1"></i> Última ejecución: <span id="updateTimeText" class="ms-1 fw-semibold">Nunca</span>
+              </div>
             </div>
+
+            <!-- Alerta de Error UI -->
+            <div id="errorAlert" class="alert alert-danger d-none align-items-center mb-3" role="alert">
+              <i class="bi bi-exclamation-triangle-fill me-2"></i>
+              <div id="errorMessage">Ocurrió un error.</div>
+            </div>
+
+            <!-- Input Dinámico de URL -->
+            <div class="mb-3">
+              <label for="xmlUrl" class="form-label fw-semibold text-secondary small text-uppercase">URL del Feed XML (Magento)</label>
+              <div class="input-group">
+                <span class="input-group-text bg-light"><i class="bi bi-link-45deg"></i></span>
+                <input type="url" id="xmlUrl" class="form-control" value="https://casadelaudio.com/media/feed/feed-magento.xml" placeholder="https://tu-tienda.com/media/feeds/catalog.xml">
+                <button class="btn btn-primary px-4 fw-semibold" type="button" id="btnProcess">
+                  <i class="bi bi-gear-fill me-1"></i> Procesar
+                </button>
+              </div>
+              <small class="text-muted">Podés cambiar esta URL en cualquier momento para procesar otro feed XML dinámicamente.</small>
+            </div>
+
+            <!-- Sección informativa amigable -->
+            <div class="p-3 bg-light border rounded-3 mb-3">
+              <h6 class="fw-bold text-dark mb-1"><i class="bi bi-info-circle-fill text-primary me-1"></i> Estado y Caché de la API</h6>
+              <p class="small text-muted mb-2">Procesa 4,000+ productos al vuelo con caché optimizada en Vercel de 1 hora.</p>
+              
+              <div class="input-group mb-1">
+                <span class="input-group-text bg-white small">Endpoint Activo</span>
+                <input type="text" id="apiUrlOutput" class="form-control bg-white font-monospace small" readonly>
+                <button class="btn btn-outline-primary" type="button" id="copyApiUrl">
+                  <i class="bi bi-clipboard me-1"></i> Copiar URL
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Vista Previa -->
+          <div class="card p-4 d-none" id="previewCard">
+            <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+              <h5 class="mb-0 fw-bold text-dark"><i class="bi bi-file-earmark-code me-2 text-primary"></i>Vista previa del JSON</h5>
+              <div class="d-flex gap-2">
+                <button id="btnDetectDiff" class="btn btn-warning btn-sm fw-semibold text-dark">
+                  <i class="bi bi-arrow-left-right me-1"></i> Simular Detectar Cambios
+                </button>
+                <button id="btnDownload" class="btn btn-success btn-sm fw-semibold">
+                  <i class="bi bi-download me-1"></i> Descargar .json
+                </button>
+                <button id="btnCopyJson" class="btn btn-outline-secondary btn-sm fw-semibold">
+                  <i class="bi bi-clipboard me-1"></i> Copiar
+                </button>
+              </div>
+            </div>
+            <pre><code id="jsonOutput"></code></pre>
+          </div>
+
         </div>
+      </div>
     </div>
+  </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script>
-        let jsonResultString = '';
-        let lastProcessedData = null;
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    const MASTER_PASSWORD = "cda-magento-json-2026"; // Contraseña de acceso
+    let jsonResultString = '';
+    let lastProcessedData = null;
 
-        function showToast(message, isError = false) {
-            const toastEl = document.getElementById('liveToast');
-            const toastBody = document.getElementById('toastMessage');
-            toastBody.textContent = message;
-            toastEl.className = `toast align-items-center text-white border-0 shadow ${isError ? 'text-bg-danger' : 'text-bg-success'}`;
-            new bootstrap.Toast(toastEl, { delay: 3000 }).show();
+    function showToast(message, isError = false) {
+      const toastEl = document.getElementById('liveToast');
+      const toastBody = document.getElementById('toastMessage');
+      toastBody.textContent = message;
+      toastEl.className = `toast align-items-center text-white border-0 shadow ${isError ? 'text-bg-danger' : 'text-bg-success'}`;
+      new bootstrap.Toast(toastEl, { delay: 3000 }).show();
+    }
+
+    function showError(msg) {
+      const alertEl = document.getElementById('errorAlert');
+      if (msg) {
+        document.getElementById('errorMessage').textContent = msg;
+        alertEl.classList.remove('d-none'); alertEl.classList.add('d-flex');
+      } else {
+        alertEl.classList.add('d-none'); alertEl.classList.remove('d-flex');
+      }
+    }
+
+    // Lógica de Login
+    window.addEventListener('DOMContentLoaded', () => {
+      const isLogged = localStorage.getItem('cda_feed_auth');
+      if (isLogged === 'true') {
+        unlockApp();
+      }
+    });
+
+    document.getElementById('btnLogin').addEventListener('click', () => {
+      const pass = document.getElementById('loginPassword').value;
+      if (pass === MASTER_PASSWORD) {
+        localStorage.setItem('cda_feed_auth', 'true');
+        unlockApp();
+      } else {
+        document.getElementById('loginError').classList.remove('d-none');
+      }
+    });
+
+    function unlockApp() {
+      document.getElementById('loginScreen').classList.add('d-none');
+      document.getElementById('appContent').classList.remove('d-none');
+      
+      const defaultXml = document.getElementById('xmlUrl').value.trim();
+      document.getElementById('apiUrlOutput').value = `${window.location.origin}/api/feed?url=${encodeURIComponent(defaultXml)}`;
+    }
+
+    document.getElementById('btnProcess').addEventListener('click', async () => {
+      const urlInput = document.getElementById('xmlUrl').value.trim();
+      showError(null);
+
+      if (!urlInput || !urlInput.startsWith('http')) {
+        showError('Ingresá una URL de XML válida.');
+        return;
+      }
+
+      const btn = document.getElementById('btnProcess');
+      btn.disabled = true;
+      btn.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span> Procesando...`;
+
+      try {
+        const apiCallUrl = `/api/feed?url=${encodeURIComponent(urlInput)}`;
+        const response = await fetch(apiCallUrl);
+        const result = await response.json();
+
+        if (!result.success) throw new Error(result.error);
+
+        lastProcessedData = result.data;
+        jsonResultString = JSON.stringify(result.data, null, 2);
+        document.getElementById('jsonOutput').textContent = jsonResultString;
+        
+        document.getElementById('previewCard').classList.remove('d-none');
+        document.getElementById('apiUrlOutput').value = `${window.location.origin}/api/feed?url=${encodeURIComponent(urlInput)}`;
+
+        if (result.updated_at) {
+          const dateObj = new Date(result.updated_at);
+          const timeFormatted = dateObj.toLocaleDateString() + ' ' + dateObj.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
+          
+          document.getElementById('updateTimeText').textContent = timeFormatted;
+          const badge = document.getElementById('lastUpdateBadge');
+          badge.classList.remove('d-none', 'bg-secondary');
+          badge.classList.add('bg-success');
         }
 
-        function showError(msg) {
-            const alertEl = document.getElementById('errorAlert');
-            if (msg) {
-                document.getElementById('errorMessage').textContent = msg;
-                alertEl.classList.remove('d-none'); alertEl.classList.add('d-flex');
-            } else {
-                alertEl.classList.add('d-none'); alertEl.classList.remove('d-flex');
-            }
-        }
+        showToast('¡Feed XML convertido a JSON correctamente!');
+      } catch (err) {
+        showError('Error al procesar: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = `<i class="bi bi-gear-fill me-1"></i> Procesar`;
+      }
+    });
 
-        window.addEventListener('DOMContentLoaded', () => {
-            const defaultXml = document.getElementById('xmlUrl').value.trim();
-            document.getElementById('apiUrlOutput').value = `${window.location.origin}/api/feed?url=${encodeURIComponent(defaultXml)}`;
-        });
+    document.getElementById('btnDetectDiff').addEventListener('click', () => {
+      if (!lastProcessedData) return;
+      showToast('Analizando cambios...');
+      setTimeout(() => {
+        alert('Simulación de Control de Cambios (Diff):\n- Se detectaron 14 productos con modificación de precio.\n- 3 productos sin stock.');
+      }, 500);
+    });
 
-        document.getElementById('btnProcess').addEventListener('click', async () => {
-            const urlInput = document.getElementById('xmlUrl').value.trim();
-            showError(null);
+    document.getElementById('btnDownload').addEventListener('click', () => {
+      const blob = new Blob([jsonResultString], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'catalog_feed.json';
+      a.click();
+      showToast('Archivo descargado.');
+    });
 
-            if (!urlInput || !urlInput.startsWith('http')) {
-                showError('Ingresá una URL de XML válida.');
-                return;
-            }
+    document.getElementById('copyApiUrl').addEventListener('click', () => {
+      const input = document.getElementById('apiUrlOutput');
+      input.select();
+      navigator.clipboard.writeText(input.value);
+      showToast('¡URL de la API copiada!');
+    });
 
-            const btn = document.getElementById('btnProcess');
-            btn.disabled = true;
-            btn.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span> Procesando...`;
-
-            try {
-                const apiCallUrl = `/api/feed?url=${encodeURIComponent(urlInput)}`;
-                const response = await fetch(apiCallUrl);
-                const result = await response.json();
-
-                if (!result.success) throw new Error(result.error);
-
-                lastProcessedData = result.data;
-                jsonResultString = JSON.stringify(result.data, null, 2);
-                document.getElementById('jsonOutput').textContent = jsonResultString;
-
-                document.getElementById('previewCard').classList.remove('d-none');
-                document.getElementById('apiUrlOutput').value = `${window.location.origin}/api/feed?url=${encodeURIComponent(urlInput)}`;
-
-                // Actualizar el contador con la fecha devuelta por el servidor
-                if (result.updated_at) {
-                    const dateObj = new Date(result.updated_at);
-                    const timeFormatted = dateObj.toLocaleDateString() + ' ' + dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-
-                    document.getElementById('updateTimeText').textContent = timeFormatted;
-                    const badge = document.getElementById('lastUpdateBadge');
-                    badge.classList.remove('d-none', 'bg-secondary');
-                    badge.classList.add('bg-success');
-                }
-
-                showToast('¡Feed XML convertido a JSON correctamente!');
-            } catch (err) {
-                showError('Error al procesar: ' + err.message);
-            } finally {
-                btn.disabled = false;
-                btn.innerHTML = `<i class="bi bi-gear-fill me-1"></i> Procesar`;
-            }
-        });
-
-        document.getElementById('btnDetectDiff').addEventListener('click', () => {
-            if (!lastProcessedData) return;
-            showToast('Analizando cambios...');
-            setTimeout(() => {
-                alert('Simulación de Control de Cambios (Diff):\n- Se detectaron 14 productos con modificación de precio.\n- 3 productos sin stock.');
-            }, 500);
-        });
-
-        document.getElementById('btnDownload').addEventListener('click', () => {
-            const blob = new Blob([jsonResultString], { type: 'application/json' });
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = 'catalog_feed.json';
-            a.click();
-            showToast('Archivo descargado.');
-        });
-
-        document.getElementById('copyApiUrl').addEventListener('click', () => {
-            const input = document.getElementById('apiUrlOutput');
-            input.select();
-            navigator.clipboard.writeText(input.value);
-            showToast('¡URL de la API copiada!');
-        });
-
-        document.getElementById('btnCopyJson').addEventListener('click', () => {
-            navigator.clipboard.writeText(jsonResultString);
-            showToast('¡JSON copiado!');
-        });
-
-
-        // Contraseña temporal o validada contra el backend
-        const MASTER_PASSWORD = "cda-pricing-secure"; // Idealmente esto viaja en una variable de entorno de Vercel
-
-        window.addEventListener('DOMContentLoaded', () => {
-            const isLogged = localStorage.getItem('cda_feed_auth');
-            if (isLogged === 'true') {
-                unlockApp();
-            }
-        });
-
-        document.getElementById('btnLogin').addEventListener('click', () => {
-            const pass = document.getElementById('loginPassword').value;
-            if (pass === MASTER_PASSWORD) {
-                localStorage.setItem('cda_feed_auth', 'true');
-                unlockApp();
-            } else {
-                document.getElementById('loginError').classList.remove('d-none');
-            }
-        });
-
-        function unlockApp() {
-            document.getElementById('loginScreen').classList.add('d-none');
-            document.getElementById('appContent').classList.remove('d-none');
-
-            // Cargar URL por defecto en el input
-            const defaultXml = document.getElementById('xmlUrl').value.trim();
-            document.getElementById('apiUrlOutput').value = `${window.location.origin}/api/feed?url=${encodeURIComponent(defaultXml)}`;
-        }
-    </script>
+    document.getElementById('btnCopyJson').addEventListener('click', () => {
+      navigator.clipboard.writeText(jsonResultString);
+      showToast('¡JSON copiado!');
+    });
+  </script>
 </body>
+</html>
 
 </html>
