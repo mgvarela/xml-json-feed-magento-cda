@@ -1,0 +1,21 @@
+name: Sincronizar Catálogo (Diario Madrugada)
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: feed-snapshot
+  cancel-in-progress: false
+
+jobs:
+  run-catalog:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Llamar API Catalogo Vercel (delta desde la última corrida)
+        env:
+          MY_SECRET_TOKEN: ${{ secrets.API_SECRET_TOKEN }}
+        run: |
+          curl -fsS --max-time 120 -X GET "https://xml-json-feed-magento-7ajapw2fx.vercel.app/api/feed?mode=catalog&since=last" \
+          -H "Authorization: Bearer $MY_SECRET_TOKEN"

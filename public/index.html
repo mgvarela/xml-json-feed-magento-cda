@@ -117,7 +117,7 @@
                 </button>
               </div>
             </div>
-            <pre style="max-height: 300px;"><code id="jsonOutput"></code></pre>
+            <pre style="max-height: 800px;"><code id="jsonOutput"></code></pre>
           </div>
 
         </div>
@@ -203,7 +203,7 @@
       logMessage(`Iniciando llamada GET al servicio (Modo: ${selectedMode})...`, 'info');
 
       try {
-        const response = await fetch(`/api/feed?mode=${selectedMode}`, {
+        const response = await fetch(`/api/feed?mode=${selectedMode}&full=1`, {
           method: 'GET',
           headers: { 'Authorization': `Bearer ${API_TOKEN}` }
         });

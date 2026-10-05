@@ -1,195 +1,443 @@
 const axios = require('axios');
+const crypto = require('crypto');
 const { XMLParser } = require('fast-xml-parser');
+const { put, get } = require('@vercel/blob');
 
-// 1. Listado de todos los feeds por categoría que querés unificar en el JSON global
-const GLOBAL_FEEDS = [
-    'https://casadelaudio.com/media/feed/api_info_uke.xml',
-    // Acá podés sumar las demás categorías cuando las generes en Magento:
-    // 'https://casadelaudio.com/media/feed/api_info_electro.xml',
-    // 'https://casadelaudio.com/media/feed/api_info_tecno.xml'
-];
+// Feeds por categoría a unificar (también configurables con FEED_URLS separados por coma)
+const GLOBAL_FEEDS = process.env.FEED_URLS
+    ? process.env.FEED_URLS.split(',').map(s => s.trim()).filter(Boolean)
+    : [
+        'https://casadelaudio.com/media/feed/api_info_uke.xml',
+        // 'https://casadelaudio.com/media/feed/api_info_electro.xml',
+        // 'https://casadelaudio.com/media/feed/api_info_tecno.xml'
+    ];
 
-// Función auxiliar para normalizar unidades de medida si es necesario
-function sanitizeUnit(value, defaultUnit) {
-    if (!value) return '';
-    let text = String(value).trim();
-    if (text.toLowerCase().includes(defaultUnit)) {
-        return text.replace(/\s+/g, ' ');
-    }
-    return `${text}${defaultUnit}`;
+const SNAPSHOT_PATH = 'feed/snapshot.json';
+
+// ---------- Helpers de valores ----------
+
+function val(x) {
+    if (x === undefined || x === null) return null;
+    if (typeof x === 'object') x = x['#text'];
+    if (x === undefined || x === null) return null;
+    const s = String(x).trim();
+    return s === '' || s.toLowerCase() === 'null' ? null : s;
 }
 
-module.exports = async (req, res) => {
-    // Headers de caché horaria en Vercel y CORS
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    res.setHeader('Cache-Control', 'public, s-maxage=3600, stale-while-revalidate=600');
+function toNumber(x) {
+    const s = val(x);
+    if (s === null) return null;
+    let t = s.replace(/[^\d.,-]/g, '');
+    const lastDot = t.lastIndexOf('.');
+    const lastComma = t.lastIndexOf(',');
+    if (lastDot >= 0 && lastComma >= 0) {
+        t = lastComma > lastDot ? t.replace(/\./g, '').replace(',', '.') : t.replace(/,/g, '');
+    } else if (lastComma >= 0) {
+        t = t.replace(',', '.');
+    }
+    const n = Number(t);
+    return Number.isFinite(n) ? n : null;
+}
 
-    if (req.method === 'OPTIONS') {
-        return res.status(200).end();
+function toBool(x) {
+    if (x === true || x === 1) return true;
+    const s = val(x);
+    return s !== null && ['true', '1', 'yes', 'si', 'sí', 'enabled', 'habilitado', 'activo'].includes(s.toLowerCase());
+}
+
+function toIsoDate(x) {
+    const s = val(x);
+    if (s === null || s.toLowerCase() === 'now') return null;
+    const d = new Date(/^\d{4}-\d{2}-\d{2} \d/.test(s) ? s.replace(' ', 'T') + 'Z' : s);
+    return isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+function asArray(x) {
+    if (x === undefined || x === null) return [];
+    return Array.isArray(x) ? x : [x];
+}
+
+// Descripciones: quita <style>, bloques CSS del Page Builder y etiquetas; deja texto plano
+function cleanDescription(html) {
+    let t = val(html);
+    if (t === null) return null;
+    t = t.replace(/<style[\s\S]*?<\/style>/gi, ' ');
+    t = t.replace(/#html-body[^{}]*\{[^}]*\}/g, ' ');
+    t = t.replace(/\[data-pb-style=[^\]]*\][^{}]*\{[^}]*\}/g, ' ');
+    t = t.replace(/<(br|\/p|\/div|\/li|\/h[1-6]|\/tr)\s*\/?>/gi, '\n');
+    t = t.replace(/<[^>]+>/g, ' ');
+    t = t.replace(/&nbsp;/gi, ' ').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>')
+        .replace(/&quot;/gi, '"').replace(/&#0?39;/g, "'").replace(/&amp;/gi, '&');
+    t = t.split('\n').map(l => l.replace(/[ \t]+/g, ' ').trim()).filter(Boolean).join('\n');
+    return t || null;
+}
+
+// "32.5 cm cm" -> "32.5 cm"; "32.5" -> "32.5 cm"
+function normalizeUnit(value, unit) {
+    let t = String(value).replace(/\s+/g, ' ').trim();
+    t = t.replace(/([a-zA-Zº"]+)(?:\s+\1)+$/i, '$1');
+    if (/^[\d.,]+$/.test(t)) return `${t} ${unit}`;
+    return t;
+}
+
+// ---------- Atributos dinámicos ----------
+
+function canonKey(raw) {
+    const k = String(raw).toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')
+        .replace(/_producto$/, '');
+    if (/^(ean|gtin|codigo_de_barras|codigo_barras)/.test(k)) return 'ean';
+    if (/^modelo/.test(k)) return 'modelo';
+    if (/^color/.test(k)) return 'color';
+    if (/^(alto|altura)/.test(k)) return 'alto';
+    if (/^ancho/.test(k)) return 'ancho';
+    if (/^(profundidad|fondo)/.test(k)) return 'profundidad';
+    if (/carga/.test(k)) return 'carga_kg';
+    if (/^peso/.test(k)) return 'peso';
+    if (/(litros|capacidad).*bruto|bruto.*(litros|capacidad)/.test(k)) return 'litros_brutos';
+    if (/(litros|capacidad).*neto|neto.*(litros|capacidad)/.test(k)) return 'litros_netos';
+    if (/^(litros|capacidad)/.test(k)) return 'capacidad_litros';
+    if (/potencia|^watts?$/.test(k)) return 'potencia';
+    if (/frigori/.test(k)) return 'frigorias';
+    if (/pulgada/.test(k)) return 'pulgadas';
+    if (/almacenamiento|memoria_interna/.test(k)) return 'almacenamiento';
+    if (/^(ram|memoria_ram)$/.test(k)) return 'ram';
+    return k;
+}
+
+const UNIT_BY_KEY = {
+    alto: 'cm', ancho: 'cm', profundidad: 'cm',
+    peso: 'kg', carga_kg: 'kg',
+    litros_brutos: 'L', litros_netos: 'L', capacidad_litros: 'L',
+    potencia: 'W', frigorias: 'fg', pulgadas: '"'
+};
+
+function formatAttr(key, value) {
+    const unit = UNIT_BY_KEY[key];
+    return unit ? normalizeUnit(value, unit) : value;
+}
+
+// Un rango de filtro ("Mas de 5000") no es un valor exacto
+function isRangeValue(v) {
+    return /^(mas|más|menos|hasta|entre|desde)\b/i.test(v) || /\d\s*(a|-)\s*\d/.test(v);
+}
+
+function buildAttributes(prod, descripcion) {
+    const out = {};
+    const set = (rawKey, rawValue) => {
+        const v = val(rawValue);
+        if (v === null) return;
+        const key = canonKey(rawKey);
+        if (key === 'frigorias' && isRangeValue(v)) return;
+        out[key] = formatAttr(key, v);
+    };
+
+    // A. Formato estructurado: <catalogo><atributos><atributo><codigo/><valor/>
+    for (const a of asArray(prod.catalogo?.atributos?.atributo)) {
+        if (!a || !a.codigo) continue;
+        const codigo = String(a.codigo).trim();
+        if (/filtro/i.test(codigo)) continue;
+        // Preferir el texto de la opción sobre el id interno de Magento
+        set(codigo, a.valor_texto ?? a.texto ?? a.label ?? a.valor);
+    }
+
+    // B. Propiedades planas del producto
+    const excluded = new Set([
+        'sku', 'sku_padre', 'parent_sku', 'nombre', 'marca', 'categoria', 'url', 'habilitado', 'updated_at',
+        'pricing', 'logistica', 'catalogo', 'atributos', 'imagenes', 'variantes',
+        'descripcion', 'descripcion_corta', 'stock', 'costo'
+    ]);
+    for (const [key, value] of Object.entries(prod)) {
+        if (excluded.has(key) || /filtro/i.test(key) || typeof value === 'object') continue;
+        set(key, value);
+    }
+
+    // C. Respaldo desde título/descripción para los datos que el agente compara
+    const texto = `${val(prod.nombre) || ''} ${descripcion || ''}`;
+    const fromText = (key, regex) => {
+        if (out[key]) return;
+        const m = texto.match(regex);
+        if (m) out[key] = formatAttr(key, m[1].replace(/\./g, ''));
+    };
+    fromText('frigorias', /(\d[\d.]*)\s*(?:fg|frigor[ií]as)/i);
+    fromText('potencia', /(\d[\d.]*)\s*(?:w|watts?)\b/i);
+    fromText('pulgadas', /(\d{2,3})\s*(?:"|''|pulgadas|pulg\b)/i);
+
+    return out;
+}
+
+// ---------- Normalización de productos ----------
+
+function buildProduct(prod, parentSku, costosMap, costosOk, prev) {
+    const sku = val(prod.sku);
+    const ext = sku ? costosMap[sku.toUpperCase()] : undefined;
+    const feedStock = toNumber(prod.logistica?.stock ?? prod.stock);
+
+    let costo;
+    let stock;
+    let stockDiscrepancy = false;
+    if (!costosOk && prev) {
+        // Sin JSON de costos disponible: se conserva lo último conocido
+        costo = prev.logistica?.costo ?? null;
+        stock = prev.logistica?.stock ?? feedStock;
+    } else {
+        costo = ext && ext.costo !== null ? ext.costo : toNumber(prod.logistica?.costo ?? prod.costo);
+        // El stock local tiene prioridad sobre el del feed
+        stock = ext && ext.stock !== null ? ext.stock : feedStock;
+        stockDiscrepancy = !!ext && ext.stock !== null && feedStock !== null && ext.stock !== feedStock;
+    }
+
+    const descripcion = cleanDescription(prod.catalogo?.descripcion ?? prod.descripcion);
+    const descripcionCorta = cleanDescription(prod.catalogo?.descripcion_corta ?? prod.descripcion_corta);
+    const imagenes = asArray(prod.catalogo?.imagenes?.imagen ?? prod.imagenes?.imagen)
+        .map(i => val(i)).filter(Boolean);
+
+    const p = prod.pricing || {};
+    return {
+        stockDiscrepancy,
+        record: {
+            sku,
+            parent_sku: parentSku || val(prod.parent_sku ?? prod.sku_padre),
+            nombre: val(prod.nombre),
+            marca: val(prod.marca),
+            categoria: val(prod.categoria),
+            url: val(prod.url),
+            habilitado: toBool(prod.habilitado),
+            updated_at: toIsoDate(prod.updated_at),
+            pricing: {
+                precio_lista: toNumber(p.precio_lista),
+                precio_un_pago: toNumber(p.precio_un_pago),
+                vigencia_desde: toIsoDate(p.vigencia_desde ?? p.precio_un_pago_desde),
+                vigencia_hasta: toIsoDate(p.vigencia_hasta ?? p.precio_un_pago_hasta),
+                cuotas_sin_interes: toNumber(p.cuotas_sin_interes)
+            },
+            logistica: { costo, stock },
+            catalogo: {
+                descripcion_corta: descripcionCorta,
+                descripcion,
+                atributos: buildAttributes(prod, descripcion),
+                imagenes: imagenes.length ? imagenes : null
+            }
+        }
+    };
+}
+
+// Expande variantes como productos propios con su sku y el sku del padre
+function flattenProducts(prod, costosMap, costosOk, prevMap, stats) {
+    const result = [];
+    const parent = buildProduct(prod, null, costosMap, costosOk, prevMap[(val(prod.sku) || '').toUpperCase()]);
+    if (parent.stockDiscrepancy) stats.stockDiscrepancies++;
+    result.push(parent.record);
+
+    for (const v of asArray(prod.variantes?.variante)) {
+        if (!v || !val(v.sku)) continue;
+        const merged = { ...prod, ...v, variantes: undefined, pricing: { ...(prod.pricing || {}), ...(v.pricing || {}) } };
+        const child = buildProduct(merged, parent.record.sku, costosMap, costosOk, prevMap[val(v.sku).toUpperCase()]);
+        if (child.stockDiscrepancy) stats.stockDiscrepancies++;
+        result.push(child.record);
+    }
+    return result;
+}
+
+// ---------- Costos / stock local ----------
+
+function buildCostosMap(data) {
+    const list = Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : []);
+    const map = {};
+    for (const item of list) {
+        const key = val(item.clave ?? item.sku ?? item.SKU);
+        if (!key) continue;
+        map[key.toUpperCase()] = {
+            costo: toNumber(item.costo ?? item.cost ?? item.precio_costo),
+            stock: toNumber(item.stock ?? item.existencias)
+        };
+    }
+    return map;
+}
+
+// ---------- Persistencia (Vercel Blob privado) ----------
+
+async function readSnapshot() {
+    const res = await get(SNAPSHOT_PATH, { access: 'private', useCache: false });
+    if (!res || res.statusCode !== 200) return null;
+    return JSON.parse(await new Response(res.stream).text());
+}
+
+async function writeSnapshot(snapshot) {
+    await put(SNAPSHOT_PATH, JSON.stringify(snapshot), {
+        access: 'private',
+        addRandomSuffix: false,
+        allowOverwrite: true,
+        contentType: 'application/json'
+    });
+}
+
+// ---------- Auth ----------
+
+function tokenValid(req) {
+    const expected = process.env.API_SECRET_TOKEN;
+    const header = req.headers.authorization;
+    if (!expected || !header || !header.startsWith('Bearer ')) return false;
+    const a = crypto.createHash('sha256').update(header.slice(7)).digest();
+    const b = crypto.createHash('sha256').update(expected).digest();
+    return crypto.timingSafeEqual(a, b);
+}
+
+const PRICING_PARTS = ['habilitado', 'pricing', 'logistica'];
+
+// ---------- Handler ----------
+
+module.exports = async (req, res) => {
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Cache-Control', 'private, no-store');
+
+    if (req.method === 'OPTIONS') return res.status(204).end();
+    if (req.method !== 'GET') return res.status(405).json({ success: false, error: 'Método no permitido' });
+
+    if (!process.env.API_SECRET_TOKEN) {
+        return res.status(500).json({ success: false, error: 'API_SECRET_TOKEN no configurado en el servidor' });
+    }
+    if (!tokenValid(req)) {
+        return res.status(401).json({
+            generated_at: new Date().toISOString(),
+            success: false,
+            error: 'Acceso no autorizado. Token inválido o cabecera Authorization faltante.'
+        });
     }
 
     try {
-        // 2. Validar Token por Header (Authorization: Bearer)
-        const authHeader = req.headers.authorization;
-        const SERVER_TOKEN = process.env.API_SECRET_TOKEN;
+        const query = req.query || Object.fromEntries(new URL(req.url, 'http://localhost').searchParams);
+        const mode = query.mode;
+        const wantFull = query.full === '1' || query.full === 'true';
 
-        let tokenValid = false;
-        if (authHeader && authHeader.startsWith('Bearer ')) {
-            if (authHeader.split(' ')[1] === SERVER_TOKEN) tokenValid = true;
+        // Sin mode: se sirve el JSON final almacenado (lo que consume el cliente)
+        if (!mode) {
+            const snapshot = await readSnapshot();
+            if (!snapshot) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'Todavía no existe un JSON generado. Ejecutá ?mode=catalog primero.'
+                });
+            }
+            return res.status(200).json(snapshot);
         }
 
-        if (!tokenValid) {
-            return res.status(401).json({ 
-                generated_at: new Date().toISOString(),
-                success: false, 
-                error: 'Acceso no autorizado. Token inválido o cabecera Authorization faltante.' 
-            });
+        if (!['pricing', 'catalog'].includes(mode)) {
+            return res.status(400).json({ success: false, error: 'mode inválido. Usá pricing o catalog.' });
         }
 
-        const targetCostosUrl = process.env.COSTOS_JSON_URL;
+        const previous = await readSnapshot();
+        // Sin base previa, pricing necesita construir también el catálogo
+        const effectiveMode = mode === 'pricing' && !previous ? 'catalog' : mode;
 
-        // 3. Preparar peticiones en paralelo: Descargar TODOS los XMLs de las categorías + Costos locales
-        const feedPromises = GLOBAL_FEEDS.map(url => 
-            axios.get(url, { responseType: 'text', timeout: 25000 }).catch(err => ({ error: true, message: err.message }))
+        let sinceMs = null;
+        if (effectiveMode === 'catalog' && query.since && previous) {
+            sinceMs = query.since === 'last' ? Date.parse(previous.catalog_updated_at) : Date.parse(query.since);
+            if (isNaN(sinceMs)) {
+                return res.status(400).json({ success: false, error: 'since inválido. Usá una fecha ISO o "last".' });
+            }
+        }
+
+        const costosUrl = process.env.COSTOS_JSON_URL;
+        const feedPromises = GLOBAL_FEEDS.map(url =>
+            axios.get(url, { responseType: 'text', timeout: 25000 })
+                .then(r => ({ url, data: r.data }))
+                .catch(err => ({ url, error: true, message: err.message }))
         );
+        const costosPromise = costosUrl
+            ? axios.get(costosUrl, { timeout: 20000 }).then(r => ({ data: r.data })).catch(err => ({ error: true, message: err.message }))
+            : Promise.resolve({ data: [] });
 
-        if (targetCostosUrl) {
-            feedPromises.push(axios.get(targetCostosUrl, { timeout: 20000 }).catch(() => ({ data: [] })));
-        }
+        const [feedResults, costosResult] = await Promise.all([Promise.all(feedPromises), costosPromise]);
 
-        const responses = await Promise.all(feedPromises);
-        
-        // Separar costos (último elemento si existía targetCostosUrl, o array vacío)
-        const costosData = targetCostosUrl ? (responses[responses.length - 1].data || []) : [];
-        const xmlResponses = targetCostosUrl ? responses.slice(0, -1) : responses;
+        const warnings = [];
+        const costosOk = !costosResult.error;
+        if (!costosOk) warnings.push(`JSON de costos no disponible (${costosResult.message}); se conservaron costo/stock previos`);
+        const costosMap = costosOk ? buildCostosMap(costosResult.data) : {};
 
-        // 4. Mapear costos y stock por SKU para cruce rápido en memoria O(1)
-        const costosMap = {};
-        if (Array.isArray(costosData)) {
-            costosData.forEach(item => {
-                const skuKey = String(item.sku || item.SKU || '').trim().toUpperCase();
-                if (skuKey) {
-                    costosMap[skuKey] = {
-                        costo: Number(item.costo || item.cost || item.precio_costo || 0),
-                        stock: item.stock !== undefined ? Number(item.stock) : undefined
-                    };
-                }
+        const feedsProcessed = feedResults.map(f => ({
+            url: f.url,
+            status: f.error ? 'error' : 'success',
+            message: f.error ? f.message : 'OK'
+        }));
+        feedsProcessed.filter(f => f.status === 'error').forEach(f => warnings.push(`Feed fallido: ${f.url} (${f.message})`));
+
+        const okFeeds = feedResults.filter(f => !f.error);
+        if (okFeeds.length === 0) {
+            return res.status(502).json({
+                generated_at: new Date().toISOString(),
+                success: false,
+                error: 'Ningún feed pudo procesarse; el JSON almacenado no se modificó',
+                feeds_processed: feedsProcessed
             });
         }
 
-        const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" });
-        let allNormalizedProducts = [];
+        const prevProducts = previous ? previous.products : [];
+        const prevMap = {};
+        prevProducts.forEach(p => { if (p.sku) prevMap[p.sku.toUpperCase()] = p; });
 
-        // Atributos base o internos que no deben entrar en el mapa dinámico de especificaciones técnicas
-        const keysToExclude = [
-            'sku', 'nombre', 'marca', 'categoria', 'url', 'habilitado', 'updated_at', 
-            'pricing', 'logistica', 'catalogo', 'atributos', 'imagenes'
-        ];
+        const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' });
+        const stats = { stockDiscrepancies: 0, updatedCatalog: 0, pricingOnly: 0, added: 0 };
+        const merged = new Map(prevProducts.map(p => [p.sku, p]));
+        const seen = new Set();
 
-        // 5. Procesar cada XML de categoría, aplicar atributos dinámicos y unificar
-        for (const xmlRes of xmlResponses) {
-            if (xmlRes.error) continue; // Si un feed falla, salta al siguiente sin romper el global
+        for (const f of okFeeds) {
+            const json = parser.parse(f.data);
+            const rawItems = asArray(json?.catalog?.product || json?.rss?.channel?.item || json?.elements || json?.item);
 
-            const jsonObj = parser.parse(xmlRes.data);
-            let rawItems = jsonObj?.catalog?.product || jsonObj?.rss?.channel?.item || jsonObj?.elements || jsonObj?.item || [];
-            if (!Array.isArray(rawItems)) rawItems = [rawItems];
+            for (const raw of rawItems) {
+                for (const rec of flattenProducts(raw, costosMap, costosOk, prevMap, stats)) {
+                    if (!rec.sku) continue;
+                    seen.add(rec.sku);
+                    const old = merged.get(rec.sku);
 
-            const normalizedProducts = rawItems.map(prod => {
-                const sku = prod.sku ? String(prod.sku).trim() : null;
-                const skuKey = sku ? sku.toUpperCase() : '';
-                const infoExterna = (skuKey && costosMap[skuKey]) ? costosMap[skuKey] : {};
+                    const modifiedSince = sinceMs === null || !rec.updated_at || Date.parse(rec.updated_at) > sinceMs;
+                    const fullRefresh = !old || (effectiveMode === 'catalog' && modifiedSince);
 
-                const costoFinal = infoExterna.costo !== undefined ? infoExterna.costo : null;
-                const stockFinal = infoExterna.stock !== undefined ? infoExterna.stock : (prod.logistica?.stock !== undefined ? Number(prod.logistica.stock) : 0);
-
-                // EXTRACCIÓN DINÁMICA DE ATRIBUTOS (Reemplazando el mapeo estático anterior)
-                let atributosMap = {};
-
-                // A. Si los atributos vienen en el formato estructurado tradicional del XML del feed
-                if (prod.catalogo && prod.catalogo.atributos) {
-                    let rawAtribs = prod.catalogo.atributos.atributo;
-                    if (!Array.isArray(rawAtribs)) rawAtribs = [rawAtribs];
-                    rawAtribs.forEach(atrib => {
-                        if (atrib && atrib.codigo && atrib.valor !== undefined) {
-                            const codigo = String(atrib.codigo).trim();
-                            // Omitir filtros por rangos
-                            if (!codigo.includes('filtro') && !codigo.endsWith('_filtro')) {
-                                atributosMap[codigo] = String(atrib.valor).trim();
-                            }
-                        }
-                    });
-                }
-
-                // B. Bionda de barrido dinámico general sobre las propiedades planas del producto si existieran
-                for (const [key, value] of Object.entries(prod)) {
-                    if (value === undefined || value === null || String(value).trim() === '' || String(value) === 'null') continue;
-                    if (keysToExclude.includes(key)) continue;
-                    if (key.includes('filtro') || key.endsWith('_filtro')) continue;
-
-                    let cleanKey = key.toLowerCase();
-                    let cleanVal = String(value).trim();
-
-                    // Normalización inteligente opcional de unidades si vienen planas
-                    if (cleanKey.includes('alto') || cleanKey.includes('ancho') || cleanKey.includes('profundidad')) {
-                        atributosMap[cleanKey.replace('_producto', '')] = sanitizeUnit(cleanVal, 'cm');
-                    } else if (cleanKey.includes('peso') || cleanKey.includes('carga')) {
-                        atributosMap['peso'] = sanitizeUnit(cleanVal, 'kg');
-                    } else if (cleanKey.includes('litros')) {
-                        atributosMap[cleanKey] = `${cleanVal} L`;
-                    } else if (cleanKey.includes('potencia')) {
-                        atributosMap['potencia'] = `${cleanVal} W`;
-                    } else if (cleanKey.includes('pulgadas')) {
-                        atributosMap['pulgadas'] = `${cleanVal}"`;
+                    if (fullRefresh) {
+                        if (!old) stats.added++; else stats.updatedCatalog++;
+                        merged.set(rec.sku, rec);
                     } else {
-                        atributosMap[cleanKey] = cleanVal;
+                        stats.pricingOnly++;
+                        const next = { ...old };
+                        PRICING_PARTS.forEach(k => { next[k] = rec[k]; });
+                        merged.set(rec.sku, next);
                     }
                 }
-
-                let imagenesList = [];
-                if (prod.catalogo && prod.catalogo.imagenes) {
-                    let rawImgs = prod.catalogo.imagenes.imagen;
-                    if (!Array.isArray(rawImgs)) rawImgs = [rawImgs];
-                    imagenesList = rawImgs.filter(img => img && typeof img === 'string');
-                }
-
-                return {
-                    sku: sku,
-                    nombre: prod.nombre !== 'null' ? prod.nombre : null,
-                    marca: prod.marca !== 'null' ? prod.marca : null,
-                    categoria: prod.categoria !== 'null' ? prod.categoria : null,
-                    url: prod.url || null,
-                    habilitado: prod.habilitado === true || prod.habilitado === 'true',
-                    updated_at: prod.updated_at || new Date().toISOString(),
-                    pricing: {
-                        precio_lista: prod.pricing?.precio_lista !== 'null' && prod.pricing?.precio_lista !== undefined ? Number(prod.pricing.precio_lista) : null,
-                        precio_un_pago: prod.pricing?.precio_un_pago !== 'null' && prod.pricing?.precio_un_pago !== undefined ? Number(prod.pricing.precio_un_pago) : null,
-                        cuotas_sin_interes: prod.pricing?.cuotas_sin_interes !== 'null' && prod.pricing?.cuotas_sin_interes !== undefined ? Number(prod.pricing.cuotas_sin_interes) : null
-                    },
-                    logistica: {
-                        costo: costoFinal,
-                        stock: stockFinal
-                    },
-                    catalogo: {
-                        descripcion_corta: prod.catalogo?.descripcion_corta !== 'null' ? prod.catalogo.descripcion_corta : null,
-                        descripcion: prod.catalogo?.descripcion !== 'null' ? prod.catalogo.descripcion : null,
-                        atributos: atributosMap,
-                        imagenes: imagenesList.length > 0 ? imagenesList : null
-                    }
-                };
-            });
-
-            allNormalizedProducts = allNormalizedProducts.concat(normalizedProducts);
+            }
         }
 
-        return res.status(200).json({
-            generated_at: new Date().toISOString(),
+        // Solo se eliminan productos ausentes si todos los feeds respondieron y no es delta
+        let removed = 0;
+        if (okFeeds.length === GLOBAL_FEEDS.length && effectiveMode === 'catalog' && sinceMs === null) {
+            for (const sku of [...merged.keys()]) {
+                if (!seen.has(sku)) { merged.delete(sku); removed++; }
+            }
+        }
+
+        const now = new Date().toISOString();
+        const snapshot = {
+            generated_at: now,
+            pricing_updated_at: now,
+            catalog_updated_at: effectiveMode === 'catalog' ? now : (previous?.catalog_updated_at || now),
+            total_products: merged.size,
+            products: [...merged.values()]
+        };
+        await writeSnapshot(snapshot);
+
+        const summary = {
             success: true,
-            total_feeds_processed: xmlResponses.filter(r => !r.error).length,
-            total_products: allNormalizedProducts.length,
-            products: allNormalizedProducts
-        });
+            mode: effectiveMode,
+            since: sinceMs !== null ? new Date(sinceMs).toISOString() : null,
+            generated_at: now,
+            total_feeds_processed: okFeeds.length,
+            feeds_processed: feedsProcessed,
+            total_products: merged.size,
+            stats: { ...stats, removed },
+            warnings
+        };
+        return res.status(200).json(wantFull ? { ...summary, products: snapshot.products } : summary);
 
     } catch (error) {
         return res.status(500).json({
