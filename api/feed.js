@@ -1,4 +1,4 @@
-﻿const axios = require('axios');
+const axios = require('axios');
 const crypto = require('crypto');
 const { XMLParser } = require('fast-xml-parser');
 const { put, get } = require('@vercel/blob');
@@ -170,12 +170,24 @@ function buildAttributes(prod, descripcion) {
     return out;
 }
 
+// Stock por sucursal; las sucursales sin stock se omiten para reducir el peso del JSON
+function parseBranchStock(logistica) {
+    const out = {};
+    for (const s of asArray(logistica?.sucursales?.sucursal)) {
+        const name = val(s?.nombre);
+        const qty = toNumber(s?.stock);
+        if (name && qty !== null && qty > 0) out[name] = qty;
+    }
+    return out;
+}
+
 // ---------- Normalización de productos ----------
 
 function buildProduct(prod, parentSku, costosMap, costosOk, prev) {
     const sku = val(prod.sku);
     const ext = sku ? costosMap[sku.toUpperCase()] : undefined;
-    const feedStock = toNumber(prod.logistica?.stock ?? prod.stock);
+    const stockPorSucursal = parseBranchStock(prod.logistica);
+    const feedStock = toNumber(prod.logistica?.stock_total ?? prod.logistica?.stock ?? prod.stock_total ?? prod.stock);
 
     let costo;
     let stock;
@@ -215,7 +227,7 @@ function buildProduct(prod, parentSku, costosMap, costosOk, prev) {
                 vigencia_hasta: toIsoDate(p.vigencia_hasta ?? p.precio_un_pago_hasta),
                 cuotas_sin_interes: toNumber(p.cuotas_sin_interes)
             },
-            logistica: { costo, stock },
+            logistica: Object.keys(stockPorSucursal).length ? { costo, stock, stock_por_sucursal: stockPorSucursal } : { costo, stock },
             catalogo: {
                 descripcion_corta: descripcionCorta,
                 descripcion,
