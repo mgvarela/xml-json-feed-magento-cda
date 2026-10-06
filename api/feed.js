@@ -1,4 +1,4 @@
-const axios = require('axios');
+﻿const axios = require('axios');
 const crypto = require('crypto');
 const { XMLParser } = require('fast-xml-parser');
 const { put, get } = require('@vercel/blob');
@@ -9,10 +9,13 @@ const GLOBAL_FEEDS = process.env.FEED_URLS
     : [
         'https://casadelaudio.com/media/feed/api_info_uke.xml',
         'https://casadelaudio.com/media/feed/api_info_electro.xml',
-        // 'https://casadelaudio.com/media/feed/api_info_tecno.xml'
+        'https://casadelaudio.com/media/feed/api_info_lineablanca.xml',
+        'https://casadelaudio.com/media/feed/api_info_hogar.xml',
+        'https://casadelaudio.com/media/feed/api_info_peque_electro.xml'
     ];
 
 const SNAPSHOT_PATH = 'feed/snapshot.json';
+const CONFIG_PATH = 'feed/config.json';
 
 // ---------- Helpers de valores ----------
 
@@ -273,6 +276,27 @@ async function writeSnapshot(snapshot) {
     });
 }
 
+// Feeds habilitados para la próxima corrida (sin config guardada: todos)
+async function readEnabledFeeds() {
+    try {
+        const res = await get(CONFIG_PATH, { access: 'private', useCache: false });
+        if (!res || res.statusCode !== 200) return [...GLOBAL_FEEDS];
+        const cfg = JSON.parse(await new Response(res.stream).text());
+        return GLOBAL_FEEDS.filter(u => Array.isArray(cfg.enabled_feeds) && cfg.enabled_feeds.includes(u));
+    } catch (e) {
+        return [...GLOBAL_FEEDS];
+    }
+}
+
+async function writeEnabledFeeds(enabled) {
+    await put(CONFIG_PATH, JSON.stringify({ enabled_feeds: enabled, updated_at: new Date().toISOString() }), {
+        access: 'private',
+        addRandomSuffix: false,
+        allowOverwrite: true,
+        contentType: 'application/json'
+    });
+}
+
 // ---------- Auth ----------
 
 function safeEqual(a, b) {
@@ -301,7 +325,7 @@ module.exports = async (req, res) => {
     res.setHeader('Cache-Control', 'private, no-store');
 
     if (req.method === 'OPTIONS') return res.status(204).end();
-    if (req.method !== 'GET') return res.status(405).json({ success: false, error: 'Método no permitido' });
+    if (req.method !== 'GET' && req.method !== 'POST') return res.status(405).json({ success: false, error: 'Método no permitido' });
 
     if (!process.env.API_SECRET_TOKEN) {
         return res.status(500).json({ success: false, error: 'API_SECRET_TOKEN no configurado en el servidor' });
@@ -320,6 +344,24 @@ module.exports = async (req, res) => {
         const wantFull = query.full === '1' || query.full === 'true';
 
         if (mode === 'ping') return res.status(200).json({ success: true });
+
+        if (mode === 'feeds') {
+            if (req.method === 'POST') {
+                let body = req.body;
+                if (typeof body === 'string') { try { body = JSON.parse(body); } catch (e) { body = null; } }
+                if (!body || !Array.isArray(body.enabled_feeds)) {
+                    return res.status(400).json({ success: false, error: 'Body inválido. Enviá { "enabled_feeds": [urls] }.' });
+                }
+                await writeEnabledFeeds(GLOBAL_FEEDS.filter(u => body.enabled_feeds.includes(u)));
+            }
+            const enabled = await readEnabledFeeds();
+            return res.status(200).json({
+                success: true,
+                feeds: GLOBAL_FEEDS.map(url => ({ url, enabled: enabled.includes(url) }))
+            });
+        }
+
+        if (req.method !== 'GET') return res.status(405).json({ success: false, error: 'Método no permitido' });
 
         // Sin mode: se sirve el JSON final almacenado (lo que consume el cliente)
         if (!mode) {
@@ -350,7 +392,11 @@ module.exports = async (req, res) => {
         }
 
         const costosUrl = process.env.COSTOS_JSON_URL;
-        const feedPromises = GLOBAL_FEEDS.map(url =>
+        const selectedFeeds = await readEnabledFeeds();
+        if (selectedFeeds.length === 0) {
+            return res.status(400).json({ success: false, error: 'No hay feeds seleccionados para procesar.' });
+        }
+        const feedPromises = selectedFeeds.map(url =>
             axios.get(url, { responseType: 'text', timeout: 25000 })
                 .then(r => ({ url, data: r.data }))
                 .catch(err => ({ url, error: true, message: err.message }))
