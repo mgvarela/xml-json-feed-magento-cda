@@ -60,6 +60,12 @@ function asArray(x) {
     return Array.isArray(x) ? x : [x];
 }
 
+function updatedAtValue(x) {
+    if (x === undefined || x === null || typeof x !== 'object') return x;
+    const atributo = asArray(x.atributo).find(a => val(a?.codigo)?.toLowerCase() === 'updated_at');
+    return atributo?.valor ?? x['#text'] ?? null;
+}
+
 // Descripciones: quita <style>, bloques CSS del Page Builder y etiquetas; deja texto plano
 function cleanDescription(html) {
     let t = val(html);
@@ -170,13 +176,13 @@ function buildAttributes(prod, descripcion) {
     return out;
 }
 
-// Stock por sucursal; las sucursales sin stock se omiten para reducir el peso del JSON
+// Stock por sucursal; se conservan también las sucursales con stock en cero
 function parseBranchStock(logistica) {
     const out = {};
     for (const s of asArray(logistica?.sucursales?.sucursal)) {
         const name = val(s?.nombre);
         const qty = toNumber(s?.stock);
-        if (name && qty !== null && qty > 0) out[name] = qty;
+        if (name && qty !== null && qty >= 0) out[name] = qty;
     }
     return out;
 }
@@ -219,7 +225,7 @@ function buildProduct(prod, parentSku, costosMap, costosOk, prev) {
             categoria: val(prod.categoria),
             url: val(prod.url),
             habilitado: toBool(prod.habilitado),
-            updated_at: toIsoDate(prod.updated_at),
+            updated_at: toIsoDate(updatedAtValue(prod.updated_at)),
             pricing: {
                 precio_lista: toNumber(p.precio_lista),
                 precio_un_pago: toNumber(p.precio_un_pago),
