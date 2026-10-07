@@ -153,9 +153,9 @@ function buildAttributes(prod, descripcion) {
 
     // B. Propiedades planas del producto
     const excluded = new Set([
-        'sku', 'sku_padre', 'parent_sku', 'nombre', 'marca', 'categoria', 'url', 'habilitado', 'updated_at',
+        'sku', 'sku_padre', 'nombre', 'marca', 'categoria', 'url', 'habilitado', 'updated_at',
         'pricing', 'logistica', 'catalogo', 'atributos', 'imagenes', 'variantes',
-        'descripcion', 'descripcion_corta', 'stock', 'costo'
+        'descripcion', 'stock', 'costo'
     ]);
     for (const [key, value] of Object.entries(prod)) {
         if (excluded.has(key) || /filtro/i.test(key) || typeof value === 'object') continue;
@@ -210,7 +210,6 @@ function buildProduct(prod, parentSku, costosMap, costosOk, prev) {
     }
 
     const descripcion = cleanDescription(prod.catalogo?.descripcion ?? prod.descripcion);
-    const descripcionCorta = cleanDescription(prod.catalogo?.descripcion_corta ?? prod.descripcion_corta);
     const imagenes = asArray(prod.catalogo?.imagenes?.imagen ?? prod.imagenes?.imagen)
         .map(i => val(i)).filter(Boolean);
 
@@ -219,7 +218,6 @@ function buildProduct(prod, parentSku, costosMap, costosOk, prev) {
         stockDiscrepancy,
         record: {
             sku,
-            parent_sku: parentSku || val(prod.parent_sku ?? prod.sku_padre),
             nombre: val(prod.nombre),
             marca: val(prod.marca),
             categoria: val(prod.categoria),
@@ -229,13 +227,10 @@ function buildProduct(prod, parentSku, costosMap, costosOk, prev) {
             pricing: {
                 precio_lista: toNumber(p.precio_lista),
                 precio_un_pago: toNumber(p.precio_un_pago),
-                vigencia_desde: toIsoDate(p.vigencia_desde ?? p.precio_un_pago_desde),
-                vigencia_hasta: toIsoDate(p.vigencia_hasta ?? p.precio_un_pago_hasta),
                 cuotas_sin_interes: toNumber(p.cuotas_sin_interes)
             },
             logistica: Object.keys(stockPorSucursal).length ? { costo, stock, stock_por_sucursal: stockPorSucursal } : { costo, stock },
             catalogo: {
-                descripcion_corta: descripcionCorta,
                 descripcion,
                 atributos: buildAttributes(prod, descripcion),
                 imagenes: imagenes.length ? imagenes : null
