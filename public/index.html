@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="UTF-8">
@@ -114,6 +114,10 @@
                 </div>
               </div>
               <div id="feedChecklist" class="list-group"><div class="text-muted small p-2">Cargando feeds...</div></div>
+              <div class="form-check form-switch mt-3">
+                <input class="form-check-input" type="checkbox" role="switch" id="chkIncludeDisabled" checked>
+                <label class="form-check-label small" for="chkIncludeDisabled">Incluir productos deshabilitados (solo una línea mínima: sku, nombre y habilitado=false)</label>
+              </div>
               <div class="text-muted small mt-2">La selección guardada aplica a Procesar y al cron automático.</div>
             </div>
 
@@ -233,6 +237,7 @@
         const result = await r.json();
         if (!result.success) throw new Error(result.error || 'Error');
         renderFeeds(result.feeds);
+        document.getElementById('chkIncludeDisabled').checked = result.include_disabled !== false;
       } catch (e) {
         document.getElementById('feedChecklist').innerHTML = `<div class="text-danger small p-2">No se pudo cargar la lista de feeds (${escapeHtml(e.message)})</div>`;
       }
@@ -251,11 +256,12 @@
         const r = await fetch('/api/feed?mode=feeds', {
           method: 'POST',
           headers: { 'x-panel-password': panelPassword, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ enabled_feeds: enabled })
+          body: JSON.stringify({ enabled_feeds: enabled, include_disabled: document.getElementById('chkIncludeDisabled').checked })
         });
         const result = await r.json();
         if (!result.success) throw new Error(result.error || 'Error');
         renderFeeds(result.feeds);
+        document.getElementById('chkIncludeDisabled').checked = result.include_disabled !== false;
         logMessage(`Selección guardada: ${enabled.length} feed(s) para la próxima corrida.`, 'success');
         showToast('Selección guardada.');
       } catch (e) {

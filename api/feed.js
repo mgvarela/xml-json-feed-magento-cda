@@ -1,4 +1,4 @@
-const axios = require('axios');
+﻿const axios = require('axios');
 const crypto = require('crypto');
 const { XMLParser } = require('fast-xml-parser');
 const { put, get } = require('@vercel/blob');
@@ -53,6 +53,53 @@ function toIsoDate(x) {
     if (s === null || s.toLowerCase() === 'now') return null;
     const d = new Date(/^\d{4}-\d{2}-\d{2} \d/.test(s) ? s.replace(' ', 'T') + 'Z' : s);
     return isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+function toHttps(u) {
+    return typeof u === 'string' ? u.replace(/^http:\/\//i, 'https://') : u;
+}
+
+// Elimina recursivamente claves null/undefined para reducir el payload
+function pruneNulls(o) {
+    if (Array.isArray(o)) return o.map(pruneNulls).filter(v => v !== null && v !== undefined);
+    if (o && typeof o === 'object') {
+        const out = {};
+        for (const [k, v] of Object.entries(o)) {
+            if (v === null || v === undefined) continue;
+            out[k] = pruneNulls(v);
+        }
+        return out;
+    }
+    return o;
+}
+
+// DTO público: normaliza snapshots antiguos (http, nulls, sucursales sin stock)
+function toPublicProduct(p) {
+    const { _feed, ...base } = p;
+    const out = { ...base, url: toHttps(p.url) };
+    const sucursales = p.logistica?.stock_por_sucursal;
+    if (sucursales) {
+        const conStock = Object.fromEntries(Object.entries(sucursales).filter(([, q]) => q > 0));
+        out.logistica = { ...p.logistica, stock_por_sucursal: Object.keys(conStock).length ? conStock : undefined };
+    }
+    return pruneNulls(out);
+}
+
+// Producto deshabilitado: una sola línea mínima, sin atributos, precios ni stock
+function toDisabledStub(p) {
+    return pruneNulls({ sku: p.sku, parent_sku: p.parent_sku, nombre: p.nombre, habilitado: false });
+}
+
+function buildPublicProducts(products, includeDisabled) {
+    const out = [];
+    for (const p of products) {
+        if (p.habilitado === false) {
+            if (includeDisabled) out.push(toDisabledStub(p));
+        } else {
+            out.push(toPublicProduct(p));
+        }
+    }
+    return out;
 }
 
 function asArray(x) {
@@ -176,13 +223,13 @@ function buildAttributes(prod, descripcion) {
     return out;
 }
 
-// Stock por sucursal; se conservan también las sucursales con stock en cero
+// Stock por sucursal: solo sucursales con stock mayor a cero
 function parseBranchStock(logistica) {
     const out = {};
     for (const s of asArray(logistica?.sucursales?.sucursal)) {
         const name = val(s?.nombre);
         const qty = toNumber(s?.stock);
-        if (name && qty !== null && qty >= 0) out[name] = qty;
+        if (name && qty !== null && qty > 0) out[name] = qty;
     }
     return out;
 }
@@ -191,8 +238,8 @@ function parseBranchStock(logistica) {
 
 function buildProduct(prod, parentSku, costosMap, costosOk, prev) {
     const sku = val(prod.sku);
-    const ext = sku ? costosMap[sku.toUpperCase()] : undefined;
     const stockPorSucursal = parseBranchStock(prod.logistica);
+    const ext = sku ? costosMap[sku.toUpperCase()] : undefined;
     const feedStock = toNumber(prod.logistica?.stock_total ?? prod.logistica?.stock ?? prod.stock_total ?? prod.stock);
 
     let costo;
@@ -216,12 +263,13 @@ function buildProduct(prod, parentSku, costosMap, costosOk, prev) {
     const p = prod.pricing || {};
     return {
         stockDiscrepancy,
-        record: {
+        record: pruneNulls({
             sku,
             nombre: val(prod.nombre),
             marca: val(prod.marca),
             categoria: val(prod.categoria),
-            url: val(prod.url),
+            parent_sku: parentSku || null,
+            url: toHttps(val(prod.url)),
             habilitado: toBool(prod.habilitado),
             updated_at: toIsoDate(updatedAtValue(prod.updated_at)),
             pricing: {
@@ -235,7 +283,7 @@ function buildProduct(prod, parentSku, costosMap, costosOk, prev) {
                 atributos: buildAttributes(prod, descripcion),
                 imagenes: imagenes.length ? imagenes : null
             }
-        }
+        })
     };
 }
 
@@ -289,20 +337,28 @@ async function writeSnapshot(snapshot) {
     });
 }
 
-// Feeds habilitados para la próxima corrida (sin config guardada: todos)
-async function readEnabledFeeds() {
+// Config guardada (sin config: todos los feeds y se incluyen deshabilitados en formato mínimo)
+async function readConfig() {
+    const fallback = { enabledFeeds: [...GLOBAL_FEEDS], includeDisabled: true };
     try {
         const res = await get(CONFIG_PATH, { access: 'private', useCache: false });
-        if (!res || res.statusCode !== 200) return [...GLOBAL_FEEDS];
+        if (!res || res.statusCode !== 200) return fallback;
         const cfg = JSON.parse(await new Response(res.stream).text());
-        return GLOBAL_FEEDS.filter(u => Array.isArray(cfg.enabled_feeds) && cfg.enabled_feeds.includes(u));
+        return {
+            enabledFeeds: GLOBAL_FEEDS.filter(u => Array.isArray(cfg.enabled_feeds) && cfg.enabled_feeds.includes(u)),
+            includeDisabled: cfg.include_disabled !== false
+        };
     } catch (e) {
-        return [...GLOBAL_FEEDS];
+        return fallback;
     }
 }
 
-async function writeEnabledFeeds(enabled) {
-    await put(CONFIG_PATH, JSON.stringify({ enabled_feeds: enabled, updated_at: new Date().toISOString() }), {
+async function readEnabledFeeds() {
+    return (await readConfig()).enabledFeeds;
+}
+
+async function writeConfig(enabled, includeDisabled) {
+    await put(CONFIG_PATH, JSON.stringify({ enabled_feeds: enabled, include_disabled: includeDisabled, updated_at: new Date().toISOString() }), {
         access: 'private',
         addRandomSuffix: false,
         allowOverwrite: true,
@@ -335,6 +391,7 @@ const PRICING_PARTS = ['habilitado', 'pricing', 'logistica'];
 
 module.exports = async (req, res) => {
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'private, no-store');
 
     if (req.method === 'OPTIONS') return res.status(204).end();
@@ -355,6 +412,11 @@ module.exports = async (req, res) => {
         const query = req.query || Object.fromEntries(new URL(req.url, 'http://localhost').searchParams);
         const mode = query.mode;
         const wantFull = query.full === '1' || query.full === 'true';
+        const resolveIncludeDisabled = async q => {
+            if (q.include_disabled === '1' || q.include_disabled === 'true') return true;
+            if (q.include_disabled === '0' || q.include_disabled === 'false') return false;
+            return (await readConfig()).includeDisabled;
+        };
 
         if (mode === 'ping') return res.status(200).json({ success: true });
 
@@ -365,11 +427,14 @@ module.exports = async (req, res) => {
                 if (!body || !Array.isArray(body.enabled_feeds)) {
                     return res.status(400).json({ success: false, error: 'Body inválido. Enviá { "enabled_feeds": [urls] }.' });
                 }
-                await writeEnabledFeeds(GLOBAL_FEEDS.filter(u => body.enabled_feeds.includes(u)));
+                const current = await readConfig();
+                const includeDisabled = typeof body.include_disabled === 'boolean' ? body.include_disabled : current.includeDisabled;
+                await writeConfig(GLOBAL_FEEDS.filter(u => body.enabled_feeds.includes(u)), includeDisabled);
             }
-            const enabled = await readEnabledFeeds();
+            const { enabledFeeds: enabled, includeDisabled } = await readConfig();
             return res.status(200).json({
                 success: true,
+                include_disabled: includeDisabled,
                 feeds: GLOBAL_FEEDS.map(url => ({ url, enabled: enabled.includes(url) }))
             });
         }
@@ -385,7 +450,8 @@ module.exports = async (req, res) => {
                     error: 'Todavía no existe un JSON generado. Ejecutá ?mode=catalog primero.'
                 });
             }
-            return res.status(200).json(snapshot);
+            const products = buildPublicProducts(snapshot.products, await resolveIncludeDisabled(query));
+            return res.status(200).json({ ...snapshot, total_products: products.length, products });
         }
 
         if (!['pricing', 'catalog'].includes(mode)) {
@@ -448,18 +514,19 @@ module.exports = async (req, res) => {
 
         const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' });
         const stats = { stockDiscrepancies: 0, updatedCatalog: 0, pricingOnly: 0, added: 0 };
-        const merged = new Map(prevProducts.map(p => [p.sku, p]));
-        const seen = new Set();
+        const prevBySku = new Map(prevProducts.map(p => [p.sku, p]));
+        const merged = new Map();
 
         for (const f of okFeeds) {
-            const json = parser.parse(f.data);
+            let json = parser.parse(f.data);
+            f.data = null;
             const rawItems = asArray(json?.catalog?.product || json?.rss?.channel?.item || json?.elements || json?.item);
 
             for (const raw of rawItems) {
                 for (const rec of flattenProducts(raw, costosMap, costosOk, prevMap, stats)) {
                     if (!rec.sku) continue;
-                    seen.add(rec.sku);
-                    const old = merged.get(rec.sku);
+                    rec._feed = f.url;
+                    const old = prevBySku.get(rec.sku);
 
                     const modifiedSince = sinceMs === null || !rec.updated_at || Date.parse(rec.updated_at) > sinceMs;
                     const fullRefresh = !old || (effectiveMode === 'catalog' && modifiedSince);
@@ -469,21 +536,24 @@ module.exports = async (req, res) => {
                         merged.set(rec.sku, rec);
                     } else {
                         stats.pricingOnly++;
-                        const next = { ...old };
+                        const next = { ...old, _feed: f.url };
                         PRICING_PARTS.forEach(k => { next[k] = rec[k]; });
                         merged.set(rec.sku, next);
                     }
                 }
             }
+            json = null;
         }
 
-        // Solo se eliminan productos ausentes si todos los feeds respondieron y no es delta
-        let removed = 0;
-        if (okFeeds.length === GLOBAL_FEEDS.length && effectiveMode === 'catalog' && sinceMs === null) {
-            for (const sku of [...merged.keys()]) {
-                if (!seen.has(sku)) { merged.delete(sku); removed++; }
+        // Solo quedan productos de los feeds seleccionados. Si un feed seleccionado falló,
+        // se conservan sus productos previos (y los de origen desconocido) para no perderlos
+        const failedFeeds = new Set(feedResults.filter(f => f.error).map(f => f.url));
+        if (failedFeeds.size > 0) {
+            for (const p of prevProducts) {
+                if (!merged.has(p.sku) && (!p._feed || failedFeeds.has(p._feed))) merged.set(p.sku, p);
             }
         }
+        const removed = prevProducts.filter(p => !merged.has(p.sku)).length;
 
         const now = new Date().toISOString();
         const snapshot = {
@@ -494,6 +564,7 @@ module.exports = async (req, res) => {
             products: [...merged.values()]
         };
         await writeSnapshot(snapshot);
+        const publicProducts = buildPublicProducts(snapshot.products, await resolveIncludeDisabled(query));
 
         const summary = {
             success: true,
@@ -502,18 +573,15 @@ module.exports = async (req, res) => {
             generated_at: now,
             total_feeds_processed: okFeeds.length,
             feeds_processed: feedsProcessed,
-            total_products: merged.size,
+            total_products: publicProducts.length,
             stats: { ...stats, removed },
             warnings
         };
-        return res.status(200).json(wantFull ? { ...summary, products: snapshot.products } : summary);
+        return res.status(200).json(wantFull ? { ...summary, products: publicProducts } : summary);
 
     } catch (error) {
-        return res.status(500).json({
-            generated_at: new Date().toISOString(),
-            success: false,
-            error: 'No se pudo procesar el consolidado global de feeds',
-            details: error.message
-        });
+        console.error('feed error:', error && error.message);
+        res.setHeader('Cache-Control', 'private, no-store');
+        return res.status(500).json({ success: false, message: 'Error al generar el feed' });
     }
 };
