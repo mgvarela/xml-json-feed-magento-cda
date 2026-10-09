@@ -101,6 +101,35 @@ Los valores del ejemplo son ilustrativos. Algunos campos pueden ser `null`, y `s
 
 **Importante sobre datos sensibles:** `logistica.costo` puede ser un costo interno. No lo muestres a clientes ni lo envíes al contexto de un chatbot salvo que exista una necesidad aprobada. Filtrá este campo en el backend consumidor antes de exponer productos al público.
 
+## Consultar con GraphQL
+
+La API también permite consultar el mismo snapshot con GraphQL. Esta opción solo cambia la salida: no vuelve a leer Magento ni modifica la generación, actualización o almacenamiento del catálogo. La consulta sigue requiriendo el header `Authorization`.
+
+Usá `POST /api/feed?mode=graphql` con `Content-Type: application/json`:
+
+```json
+{
+  "query": "query Productos($texto: String, $cantidad: Int) { total_products(search: $texto) products(search: $texto, limit: $cantidad) { sku nombre marca pricing { precio_un_pago } logistica { stock } } }",
+  "variables": {
+    "texto": "televisor",
+    "cantidad": 10
+  }
+}
+```
+
+GraphQL devuelve solamente los campos pedidos. `products` acepta:
+
+- `sku`: coincidencia exacta, sin distinguir mayúsculas.
+- `search`: busca por SKU, nombre, marca o categoría.
+- `categoria`: coincidencia parcial en la categoría.
+- `habilitado`: filtra por estado.
+- `include_disabled`: incluye u omite productos deshabilitados; si se omite, conserva la configuración general.
+- `limit` y `offset`: paginación; `limit` admite de 1 a 100 y por defecto es 50.
+
+`total_products` acepta los filtros de producto y devuelve el total antes de paginar. `product(sku: "...")` devuelve un único producto. Para descripciones largas, atributos dinámicos, imágenes y stock por sucursal, el schema expone `catalogo { descripcion atributos imagenes }` y `logistica { stock_por_sucursal }`; los objetos dinámicos (`atributos` y `stock_por_sucursal`) usan el escalar JSON.
+
+También se admite `GET /api/feed?mode=graphql&query=...` para consultas pequeñas. Para POST, variables y consultas más largas, se recomienda el método POST mostrado arriba.
+
 ## Disponibilidad
 
 Para comprobar que la API responde y que las credenciales son válidas:
@@ -196,7 +225,7 @@ Solo se aceptan URLs que estén incluidas en la configuración de feeds de la ap
 
 - La respuesta usa JSON UTF-8; las fechas normalizadas se expresan en ISO 8601/UTC.
 - Los importes y cantidades numéricas se devuelven como números JSON o `null`.
-- No hay filtros por SKU/categoría, búsqueda de texto ni paginación: el endpoint entrega el snapshot completo. El consumidor debe filtrar localmente o implementar una capa de consulta propia.
+- La respuesta JSON normal entrega el snapshot completo; para filtros, búsqueda, paginación y selección de campos, se puede usar GraphQL (`mode=graphql`).
 - Para consultas frecuentes, se recomienda descargar y guardar el snapshot en el backend consumidor en vez de solicitarlo por cada interacción del usuario.
 - Las actualizaciones automáticas se ejecutan mediante workflows programados: catálogo diariamente y precios/logística cada hora. La disponibilidad efectiva depende de que esos workflows y los feeds de origen hayan finalizado correctamente.
 - La API responde con `Cache-Control: private, no-store`; el consumidor puede implementar su propia estrategia de almacenamiento y actualización.

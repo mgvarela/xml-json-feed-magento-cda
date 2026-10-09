@@ -2,6 +2,19 @@
 const crypto = require('crypto');
 const { XMLParser } = require('fast-xml-parser');
 const { put, get } = require('@vercel/blob');
+const {
+    GraphQLList,
+    GraphQLNonNull,
+    GraphQLObjectType,
+    GraphQLScalarType,
+    GraphQLSchema,
+    GraphQLString,
+    GraphQLFloat,
+    GraphQLBoolean,
+    GraphQLInt,
+    valueFromASTUntyped,
+    graphql
+} = require('graphql');
 
 // Feeds por categoría a unificar (también configurables con FEED_URLS separados por coma)
 const GLOBAL_FEEDS = process.env.FEED_URLS
@@ -387,6 +400,129 @@ function tokenValid(req) {
 
 const PRICING_PARTS = ['habilitado', 'pricing', 'logistica'];
 
+const JSONScalar = new GraphQLScalarType({
+    name: 'JSON',
+    serialize: value => value,
+    parseValue: value => value,
+    parseLiteral: ast => valueFromASTUntyped(ast)
+});
+
+const PricingType = new GraphQLObjectType({
+    name: 'Pricing',
+    fields: {
+        precio_lista: { type: GraphQLFloat },
+        precio_un_pago: { type: GraphQLFloat },
+        cuotas_sin_interes: { type: GraphQLFloat }
+    }
+});
+
+const LogisticsType = new GraphQLObjectType({
+    name: 'Logistica',
+    fields: {
+        costo: { type: GraphQLFloat },
+        stock: { type: GraphQLFloat },
+        stock_por_sucursal: { type: JSONScalar }
+    }
+});
+
+const CatalogType = new GraphQLObjectType({
+    name: 'Catalogo',
+    fields: {
+        descripcion: { type: GraphQLString },
+        atributos: { type: JSONScalar },
+        imagenes: { type: new GraphQLList(GraphQLString) }
+    }
+});
+
+const ProductType = new GraphQLObjectType({
+    name: 'Product',
+    fields: {
+        sku: { type: GraphQLString },
+        parent_sku: { type: GraphQLString },
+        nombre: { type: GraphQLString },
+        marca: { type: GraphQLString },
+        categoria: { type: GraphQLString },
+        url: { type: GraphQLString },
+        habilitado: { type: GraphQLBoolean },
+        updated_at: { type: GraphQLString },
+        pricing: { type: PricingType },
+        logistica: { type: LogisticsType },
+        catalogo: { type: CatalogType }
+    }
+});
+
+function filterProducts(products, { sku, search, categoria, habilitado } = {}) {
+    const exactSku = typeof sku === 'string' ? sku.toLowerCase() : null;
+    const text = typeof search === 'string' ? search.trim().toLowerCase() : '';
+    const category = typeof categoria === 'string' ? categoria.trim().toLowerCase() : '';
+    return products.filter(product => {
+        if (exactSku && product.sku?.toLowerCase() !== exactSku) return false;
+        if (typeof habilitado === 'boolean' && product.habilitado !== habilitado) return false;
+        if (category && !product.categoria?.toLowerCase().includes(category)) return false;
+        if (text && ![product.sku, product.nombre, product.marca, product.categoria]
+            .some(value => value?.toLowerCase().includes(text))) return false;
+        return true;
+    });
+}
+
+const productFilterArgs = {
+    sku: { type: GraphQLString },
+    search: { type: GraphQLString },
+    categoria: { type: GraphQLString },
+    habilitado: { type: GraphQLBoolean },
+    include_disabled: { type: GraphQLBoolean }
+};
+
+const CatalogQueryType = new GraphQLObjectType({
+    name: 'Query',
+    fields: {
+        products: {
+            type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(ProductType))),
+            args: { ...productFilterArgs, limit: { type: GraphQLInt }, offset: { type: GraphQLInt } },
+            resolve: async (_, args, context) => {
+                const includeDisabled = args.include_disabled === undefined
+                    ? context.includeDisabled
+                    : args.include_disabled;
+                const products = buildPublicProducts(context.snapshot.products, includeDisabled);
+                const filtered = filterProducts(products, args);
+                const limit = args.limit === undefined ? 50 : args.limit;
+                const offset = args.offset === undefined ? 0 : args.offset;
+                if (!Number.isInteger(limit) || limit < 1 || limit > 100 ||
+                    !Number.isInteger(offset) || offset < 0) {
+                    throw new Error('limit debe estar entre 1 y 100 y offset debe ser mayor o igual a 0.');
+                }
+                return filtered.slice(offset, offset + limit);
+            }
+        },
+        total_products: {
+            type: new GraphQLNonNull(GraphQLInt),
+            args: productFilterArgs,
+            resolve: async (_, args, context) => {
+                const includeDisabled = args.include_disabled === undefined
+                    ? context.includeDisabled
+                    : args.include_disabled;
+                return filterProducts(
+                    buildPublicProducts(context.snapshot.products, includeDisabled),
+                    args
+                ).length;
+            }
+        },
+        product: {
+            type: ProductType,
+            args: { sku: { type: new GraphQLNonNull(GraphQLString) }, include_disabled: { type: GraphQLBoolean } },
+            resolve: async (_, args, context) => {
+                const includeDisabled = args.include_disabled === undefined
+                    ? context.includeDisabled
+                    : args.include_disabled;
+                return buildPublicProducts(context.snapshot.products, includeDisabled)
+                    .find(product => product.sku?.toLowerCase() === args.sku.toLowerCase()) || null;
+            }
+        }
+    }
+});
+
+const catalogSchema = new GraphQLSchema({ query: CatalogQueryType });
+
 // ---------- Handler ----------
 
 module.exports = async (req, res) => {
@@ -419,6 +555,41 @@ module.exports = async (req, res) => {
         };
 
         if (mode === 'ping') return res.status(200).json({ success: true });
+
+        if (mode === 'graphql') {
+            let body = req.body;
+            if (typeof body === 'string') {
+                try { body = JSON.parse(body); } catch (e) { body = null; }
+            }
+            const source = req.method === 'GET' ? query.query : body?.query;
+            if (typeof source !== 'string' || !source.trim()) {
+                return res.status(400).json({ errors: [{ message: 'Falta la consulta GraphQL en el campo query.' }] });
+            }
+            let variables = req.method === 'GET' ? query.variables : body?.variables;
+            if (typeof variables === 'string') {
+                try { variables = JSON.parse(variables); } catch (e) {
+                    return res.status(400).json({ errors: [{ message: 'variables debe ser un objeto JSON válido.' }] });
+                }
+            }
+            if (variables !== undefined && (!variables || Array.isArray(variables) || typeof variables !== 'object')) {
+                return res.status(400).json({ errors: [{ message: 'variables debe ser un objeto JSON.' }] });
+            }
+            const snapshot = await readSnapshot();
+            if (!snapshot) {
+                return res.status(404).json({ errors: [{ message: 'Todavía no existe un snapshot. Ejecutá ?mode=catalog primero.' }] });
+            }
+            const result = await graphql({
+                schema: catalogSchema,
+                source,
+                variableValues: variables,
+                operationName: req.method === 'GET' ? query.operationName : body?.operationName,
+                contextValue: {
+                    snapshot,
+                    includeDisabled: await resolveIncludeDisabled(query)
+                }
+            });
+            return res.status(result.errors && !result.data ? 400 : 200).json(result);
+        }
 
         if (mode === 'feeds') {
             if (req.method === 'POST') {
