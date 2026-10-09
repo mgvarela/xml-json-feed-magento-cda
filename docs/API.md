@@ -251,3 +251,8 @@ Estas variables se configuran en el entorno de despliegue, no en el consumidor:
 - `FEED_URLS` (opcional): lista de URLs de feeds separadas por comas. Si no se define, se usan los feeds predeterminados del código.
 - `COSTOS_JSON_URL` (opcional): URL del JSON local de costos y stock.
 - `PANEL_PASSWORD` (opcional): contraseña usada por el panel administrativo; no reemplaza `API_SECRET_TOKEN`.
+
+## Buscador de productos por SKU y PDF
+
+La página estática `/buscador.html` (ver `public/buscador.html`) permite buscar un producto por SKU, ver toda su información y descargar una ficha en PDF con nombre, SKU, descripción y atributos. Usa la contraseña del panel (`PANEL_PASSWORD`) y consulta el snapshot mediante `?mode=graphql`; el PDF se genera en el navegador con jsPDF. Acepta `/buscador.html?sku=XXXX` para abrir un producto directamente.
+

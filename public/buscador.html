@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Buscador de productos por SKU</title>
+  <link rel="icon" href="/images/favicon.ico">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { background: #f4f6f9; }
+    .desc { white-space: pre-line; }
+    .thumb { width: 110px; height: 110px; object-fit: contain; background: #fff; border: 1px solid #dee2e6; border-radius: .5rem; }
+    .attr-key { width: 35%; text-transform: capitalize; }
+  </style>
+</head>
+<body>
+  <div class="container py-4" style="max-width: 900px;">
+
+    <div id="loginScreen" class="card shadow-sm mx-auto" style="max-width: 380px;">
+      <div class="card-body">
+        <h5 class="card-title mb-3">Acceso</h5>
+        <input type="password" id="loginPassword" class="form-control mb-2" placeholder="Contraseña del panel" autocomplete="current-password">
+        <div id="loginError" class="text-danger small mb-2 d-none">Contraseña incorrecta.</div>
+        <button id="btnLogin" class="btn btn-primary w-100">Ingresar</button>
+      </div>
+    </div>
+
+    <div id="appContent" class="d-none">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h4 class="mb-0">Buscador de productos por SKU</h4>
+        <a href="/" class="btn btn-sm btn-outline-secondary">Panel del feed</a>
+      </div>
+
+      <form id="searchForm" class="input-group mb-3">
+        <input type="text" id="skuInput" class="form-control" placeholder="Ingresá el SKU" autocomplete="off" required>
+        <button class="btn btn-primary" type="submit" id="btnSearch">Buscar</button>
+      </form>
+
+      <div id="status" class="alert d-none"></div>
+      <div id="suggestions" class="list-group mb-3 d-none"></div>
+      <div id="result" class="d-none"></div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <script>
+    // La contraseña se valida en el servidor (PANEL_PASSWORD); el token de la API nunca llega al navegador
+    let panelPassword = sessionStorage.getItem('cda_panel_pw') || '';
+    let currentProduct = null;
+
+    const $ = id => document.getElementById(id);
+    const escapeHtml = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const money = n => (n === undefined || n === null) ? '-' : '$ ' + Number(n).toLocaleString('es-AR');
+    const prettyKey = k => String(k).replace(/_/g, ' ');
+
+    const PRODUCT_FIELDS = `
+      sku parent_sku nombre marca categoria url habilitado updated_at
+      pricing { precio_lista precio_un_pago cuotas_sin_interes }
+      logistica { costo stock stock_por_sucursal }
+      catalogo { descripcion atributos imagenes }`;
+
+    async function gql(query, variables) {
+      const r = await fetch('/api/feed?mode=graphql', {
+        method: 'POST',
+        headers: { 'x-panel-password': panelPassword, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, variables })
+      });
+      if (r.status === 401) {
+        sessionStorage.removeItem('cda_panel_pw');
+        panelPassword = '';
+        location.reload();
+        throw new Error('Sesión expirada');
+      }
+      const result = await r.json();
+      if (result.errors && !result.data) throw new Error(result.errors[0].message);
+      return result.data;
+    }
+
+    function setStatus(msg, type = 'info') {
+      const el = $('status');
+      if (!msg) { el.classList.add('d-none'); return; }
+      el.className = `alert alert-${type}`;
+      el.textContent = msg;
+    }
+
+    function unlock() {
+      $('loginScreen').classList.add('d-none');
+      $('appContent').classList.remove('d-none');
+      $('skuInput').focus();
+    }
+
+    $('btnLogin').addEventListener('click', async () => {
+      const pass = $('loginPassword').value;
+      let ok = false;
+      try { ok = (await fetch('/api/feed?mode=ping', { headers: { 'x-panel-password': pass } })).ok; } catch (e) { ok = false; }
+      if (ok) {
+        panelPassword = pass;
+        sessionStorage.setItem('cda_panel_pw', pass);
+        unlock();
+      } else {
+        $('loginError').classList.remove('d-none');
+      }
+    });
+    $('loginPassword').addEventListener('keydown', e => { if (e.key === 'Enter') $('btnLogin').click(); });
+
+    window.addEventListener('DOMContentLoaded', () => {
+      if (panelPassword) unlock();
+      const sku = new URLSearchParams(location.search).get('sku');
+      if (sku && panelPassword) { $('skuInput').value = sku; search(sku); }
+    });
+
+    $('searchForm').addEventListener('submit', e => {
+      e.preventDefault();
+      search($('skuInput').value.trim());
+    });
+
+    async function search(sku) {
+      if (!sku) return;
+      setStatus(null);
+      $('result').classList.add('d-none');
+      $('suggestions').classList.add('d-none');
+      currentProduct = null;
+      $('btnSearch').disabled = true;
+      try {
+        const data = await gql(`query($sku: String!) { product(sku: $sku, include_disabled: true) { ${PRODUCT_FIELDS} } }`, { sku });
+        if (data.product) return renderProduct(data.product);
+
+        const alt = await gql(
+          `query($q: String) { products(search: $q, limit: 10, include_disabled: true) { sku nombre } }`, { q: sku });
+        const items = alt.products?.items || alt.products || [];
+        if (!items.length) return setStatus(`No se encontró ningún producto con el SKU "${sku}".`, 'warning');
+        setStatus(`No existe el SKU "${sku}". ¿Quisiste decir alguno de estos?`, 'warning');
+        $('suggestions').innerHTML = items.map(p =>
+          `<button type="button" class="list-group-item list-group-item-action" data-sku="${escapeHtml(p.sku)}">
+             <strong>${escapeHtml(p.sku)}</strong> - ${escapeHtml(p.nombre || '')}</button>`).join('');
+        $('suggestions').classList.remove('d-none');
+      } catch (e) {
+        setStatus('Error al consultar: ' + e.message, 'danger');
+      } finally {
+        $('btnSearch').disabled = false;
+      }
+    }
+
+    $('suggestions').addEventListener('click', e => {
+      const b = e.target.closest('[data-sku]');
+      if (b) { $('skuInput').value = b.dataset.sku; search(b.dataset.sku); }
+    });
+
+    function renderProduct(p) {
+      currentProduct = p;
+      const attrs = Object.entries(p.catalogo?.atributos || {});
+      const sucursales = Object.entries(p.logistica?.stock_por_sucursal || {});
+      const imgs = p.catalogo?.imagenes || [];
+      const safeUrl = /^https:\/\//i.test(p.url || '') ? p.url : null;
+
+      $('result').innerHTML = `
+        <div class="card shadow-sm">
+          <div class="card-body">
+            <div class="d-flex flex-wrap justify-content-between gap-2 mb-2">
+              <div>
+                <h5 class="mb-1">${escapeHtml(p.nombre || '(sin nombre)')}</h5>
+                <div class="text-muted small">SKU: <span class="font-monospace">${escapeHtml(p.sku)}</span>
+                  ${p.parent_sku ? ` · Padre: <a href="?sku=${encodeURIComponent(p.parent_sku)}">${escapeHtml(p.parent_sku)}</a>` : ''}
+                  ${p.habilitado === false ? ' · <span class="badge text-bg-secondary">Deshabilitado</span>' : ''}</div>
+              </div>
+              <div class="d-flex gap-2 align-self-start">
+                ${safeUrl ? `<a class="btn btn-outline-secondary btn-sm" href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener">Ver en tienda</a>` : ''}
+                <button class="btn btn-danger btn-sm" id="btnPdf">Descargar PDF</button>
+              </div>
+            </div>
+
+            ${imgs.length ? `<div class="d-flex gap-2 flex-wrap mb-3">${imgs.slice(0, 6).map(u =>
+              `<img class="thumb" loading="lazy" referrerpolicy="no-referrer" src="${escapeHtml(u)}" alt="">`).join('')}</div>` : ''}
+
+            <dl class="row small mb-3">
+              ${row('Marca', p.marca)}
+              ${row('Categoría', p.categoria)}
+              ${row('Precio lista', p.pricing?.precio_lista != null ? money(p.pricing.precio_lista) : null)}
+              ${row('Precio un pago', p.pricing?.precio_un_pago != null ? money(p.pricing.precio_un_pago) : null)}
+              ${row('Cuotas sin interés', p.pricing?.cuotas_sin_interes)}
+              ${row('Costo', p.logistica?.costo != null ? money(p.logistica.costo) : null)}
+              ${row('Stock', p.logistica?.stock)}
+              ${row('Stock por sucursal', sucursales.map(([n, q]) => `${n}: ${q}`).join(' · ') || null)}
+              ${row('Actualizado', p.updated_at ? new Date(p.updated_at).toLocaleString('es-AR') : null)}
+            </dl>
+
+            <h6>Descripción</h6>
+            <p class="desc small">${p.catalogo?.descripcion ? escapeHtml(p.catalogo.descripcion) : '<span class="text-muted">Sin descripción.</span>'}</p>
+
+            <h6>Atributos</h6>
+            ${attrs.length ? `<table class="table table-sm table-striped small"><tbody>${attrs.map(([k, v]) =>
+              `<tr><td class="attr-key fw-semibold">${escapeHtml(prettyKey(k))}</td><td>${escapeHtml(v)}</td></tr>`).join('')}</tbody></table>`
+              : '<p class="text-muted small">Sin atributos.</p>'}
+
+            <details class="mt-3"><summary class="small text-muted">Ver JSON completo</summary>
+              <pre class="small bg-light p-2 mt-2 border rounded" style="max-height:320px;overflow:auto">${escapeHtml(JSON.stringify(p, null, 2))}</pre>
+            </details>
+          </div>
+        </div>`;
+      $('result').classList.remove('d-none');
+      $('btnPdf').addEventListener('click', () => downloadPdf(currentProduct));
+    }
+
+    function row(label, value) {
+      if (value === undefined || value === null || value === '') return '';
+      return `<dt class="col-sm-4">${escapeHtml(label)}</dt><dd class="col-sm-8">${escapeHtml(value)}</dd>`;
+    }
+
+    // Las fuentes estándar de jsPDF solo cubren Latin-1: se reemplazan símbolos habituales fuera de ese rango
+    const pdfText = s => String(s ?? '')
+      .replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"')
+      .replace(/[\u2013\u2014]/g, '-').replace(/\u2022/g, '-').replace(/\u2026/g, '...')
+      .replace(/[^\x09\x0A\x20-\x7E\u00A0-\u00FF]/g, '');
+
+    function downloadPdf(p) {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+      const M = 15, W = doc.internal.pageSize.getWidth() - M * 2, H = doc.internal.pageSize.getHeight();
+      let y = M;
+
+      const ensure = h => { if (y + h > H - M) { doc.addPage(); y = M; } };
+      const write = (text, { size = 10, bold = false, x = M, width = W, gap = 1.5 } = {}) => {
+        doc.setFont('helvetica', bold ? 'bold' : 'normal').setFontSize(size);
+        const lh = size * 0.4;
+        for (const line of doc.splitTextToSize(pdfText(text), width)) {
+          ensure(lh);
+          y += lh;
+          doc.text(line, x, y);
+        }
+        y += gap;
+      };
+      const title = t => { y += 3; ensure(10); write(t, { size: 12, bold: true, gap: 1 }); doc.setDrawColor(180).line(M, y, M + W, y); y += 3; };
+
+      write('Ficha de producto', { size: 9, gap: 3 });
+      title('Nombre');
+      write(p.nombre || '-', { size: 13, bold: true });
+      title('SKU');
+      write(p.sku || '-', { size: 11 });
+      title('Descripción');
+      write(p.catalogo?.descripcion || 'Sin descripción.');
+      title('Atributos');
+      const attrs = Object.entries(p.catalogo?.atributos || {});
+      if (!attrs.length) write('Sin atributos.');
+      const keyW = 55;
+      const lh = 10 * 0.4;
+      for (const [k, v] of attrs) {
+        const label = doc.setFont('helvetica', 'bold').setFontSize(10).splitTextToSize(pdfText(prettyKey(k)), keyW - 3);
+        const value = doc.setFont('helvetica', 'normal').splitTextToSize(pdfText(v), W - keyW);
+        const lines = Math.max(label.length, value.length);
+        ensure(lines * lh + 1.5);
+        doc.setFont('helvetica', 'bold').text(label, M, y + lh);
+        doc.setFont('helvetica', 'normal').text(value, M + keyW, y + lh);
+        y += lines * lh + 1.5;
+      }
+
+      const total = doc.getNumberOfPages();
+      for (let i = 1; i <= total; i++) {
+        doc.setPage(i).setFont('helvetica', 'normal').setFontSize(8).setTextColor(130);
+        doc.text(`SKU ${pdfText(p.sku)} - Página ${i} de ${total}`, M, H - 8);
+      }
+      doc.save(`producto-${String(p.sku).replace(/[^\w.-]+/g, '_')}.pdf`);
+    }
+  </script>
+</body>
+</html>
