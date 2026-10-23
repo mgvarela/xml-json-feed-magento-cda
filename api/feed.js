@@ -95,12 +95,38 @@ function pruneNulls(o) {
 function toPublicProduct(p) {
     const { _feed, ...base } = p;
     const out = { ...base, url: toHttps(p.url) };
+    if (p.pricing) {
+        const precioTachado = toNumber(p.pricing.precio_tachado) ?? toNumber(p.pricing.precio_lista);
+        const precioFinal = toNumber(p.pricing.precio_final)
+            ?? toNumber(p.pricing.precio_un_pago)
+            ?? toNumber(p.pricing.precio_lista);
+        const precioUnPago = toPriceNumber(p.pricing.precio_1_pago);
+        out.pricing = {
+            ...p.pricing,
+            precio_tachado: precioTachado,
+            precio_final: precioFinal,
+            precio_1_pago: precioUnPago,
+            costo: toNumber(p.pricing.costo) ?? toNumber(p.logistica?.costo),
+            cuotas_sin_interes: toNumber(p.pricing.cuotas_sin_interes)
+        };
+    }
     const sucursales = p.logistica?.stock_por_sucursal;
     if (sucursales) {
         const conStock = Object.fromEntries(Object.entries(sucursales).filter(([, q]) => q > 0));
         out.logistica = { ...p.logistica, stock_por_sucursal: Object.keys(conStock).length ? conStock : undefined };
     }
-    return pruneNulls(out);
+    const publicProduct = pruneNulls(out);
+    if (out.pricing) {
+        publicProduct.pricing = {
+            ...publicProduct.pricing,
+            precio_tachado: out.pricing.precio_tachado,
+            precio_final: out.pricing.precio_final,
+            costo: out.pricing.costo,
+            cuotas_sin_interes: out.pricing.cuotas_sin_interes,
+            precio_1_pago: out.pricing.precio_1_pago
+        };
+    }
+    return publicProduct;
 }
 
 function buildPublicProducts(products, includeDisabled) {
@@ -250,8 +276,9 @@ function buildProduct(prod, parentSku, costosMap, costosOk, prev) {
     const sku = val(prod.sku);
     const stockPorSucursal = parseBranchStock(prod.logistica);
     const ext = sku ? costosMap[sku.toUpperCase()] : undefined;
+    const stockWeb = toNumber(prod.logistica?.stock_web);
     const feedStock = toNumber(prod.logistica?.stock_total)
-        ?? toNumber(prod.logistica?.stock_web)
+        ?? stockWeb
         ?? toNumber(prod.logistica?.stock)
         ?? toNumber(prod.stock_total)
         ?? toNumber(prod.stock);
@@ -289,11 +316,19 @@ function buildProduct(prod, parentSku, costosMap, costosOk, prev) {
             habilitado: toBool(prod.habilitado),
             updated_at: toIsoDate(updatedAtValue(prod.updated_at)),
             pricing: {
+                precio_tachado: toNumber(p.precio_tachado) ?? toNumber(p.precio_lista),
+                precio_final: toNumber(p.precio_final)
+                    ?? toNumber(p.precio_un_pago)
+                    ?? toNumber(p.precio_lista),
+                precio_1_pago: toPriceNumber(p.precio_1_pago),
+                costo: toNumber(p.costo) ?? costo,
                 precio_lista: toNumber(p.precio_tachado) ?? toNumber(p.precio_lista) ?? toNumber(p.precio_final),
                 precio_un_pago: toPriceNumber(p.precio_1_pago) ?? toNumber(p.precio_un_pago) ?? toNumber(p.precio_final),
                 cuotas_sin_interes: toNumber(p.cuotas_sin_interes)
             },
-            logistica: Object.keys(stockPorSucursal).length ? { costo, stock, stock_por_sucursal: stockPorSucursal } : { costo, stock },
+            logistica: Object.keys(stockPorSucursal).length
+                ? { costo, stock, stock_web: stockWeb, stock_por_sucursal: stockPorSucursal }
+                : { costo, stock, stock_web: stockWeb },
             catalogo: {
                 descripcion,
                 atributos: buildAttributes(prod, descripcion),
@@ -413,6 +448,10 @@ const JSONScalar = new GraphQLScalarType({
 const PricingType = new GraphQLObjectType({
     name: 'Pricing',
     fields: {
+        precio_tachado: { type: GraphQLFloat },
+        precio_final: { type: GraphQLFloat },
+        precio_1_pago: { type: GraphQLFloat },
+        costo: { type: GraphQLFloat },
         precio_lista: { type: GraphQLFloat },
         precio_un_pago: { type: GraphQLFloat },
         cuotas_sin_interes: { type: GraphQLFloat }
@@ -424,6 +463,7 @@ const LogisticsType = new GraphQLObjectType({
     fields: {
         costo: { type: GraphQLFloat },
         stock: { type: GraphQLFloat },
+        stock_web: { type: GraphQLFloat },
         stock_por_sucursal: { type: JSONScalar }
     }
 });

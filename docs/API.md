@@ -56,15 +56,20 @@ Respuesta resumida:
       "habilitado": true,
       "updated_at": "2026-10-07T17:00:00.000Z",
       "pricing": {
-        "precio_lista": 100000,
-        "precio_un_pago": 90000,
+        "precio_tachado": 460794.75,
+        "precio_final": 424500,
+        "costo": null,
+        "cuotas_sin_interes": 6,
+        "precio_1_pago": 394000,
+        "precio_lista": 460794.75,
+        "precio_un_pago": 394000,
         "vigencia_desde": null,
-        "vigencia_hasta": null,
-        "cuotas_sin_interes": 6
+        "vigencia_hasta": null
       },
       "logistica": {
         "costo": 50000,
         "stock": 4,
+        "stock_web": 4,
         "stock_por_sucursal": {
           "Sucursal Centro": 2,
           "Sucursal Norte": 2
@@ -86,7 +91,7 @@ Respuesta resumida:
 }
 ```
 
-Los valores del ejemplo son ilustrativos. Algunos campos pueden ser `null`, y `stock_por_sucursal` solo se incluye cuando hay datos de sucursales. `atributos` es dinámico: sus claves dependen de los atributos disponibles en el feed. Las variantes se devuelven como productos independientes, con su propio `sku` y el `parent_sku` del producto padre.
+Los valores de los precios y el stock son ilustrativos. `precio_tachado` es el precio regular tachado en la web; `precio_final` es el precio principal vigente (que puede corresponder al precio en cuotas); `precio_1_pago` es el importe numérico extraído del campo del feed; `cuotas_sin_interes` se devuelve como cantidad numérica. `logistica.stock_web` es la suma del stock de los depósitos web 5 (Depósito) y 50 (Depósito 2), según el feed. `logistica.stock` se mantiene por compatibilidad y puede provenir del archivo externo de stock/costos; para consultar el total de stock web usá `stock_web`. `stock_por_sucursal` muestra las sucursales con stock positivo e incluye los depósitos cuando tienen unidades. `costo` se incluye en `pricing` y puede repetirse en `logistica`; es un dato interno, así que consumilo solo si su uso está autorizado. `precio_lista` y `precio_un_pago` se mantienen por compatibilidad con consumidores existentes; para nuevas integraciones usá los nombres explícitos. Los campos sin datos se devuelven como `null`. `atributos` es dinámico: sus claves dependen de los atributos disponibles en el feed. Las variantes se devuelven como productos independientes, con su propio `sku` y el `parent_sku` del producto padre.
 
 ### Campos del snapshot
 
@@ -110,7 +115,7 @@ Usá `POST /api/feed?mode=graphql` con `Content-Type: application/json`:
 
 ```json
 {
-  "query": "query Productos($texto: String, $cantidad: Int) { total_products(search: $texto) products(search: $texto, limit: $cantidad) { sku nombre marca pricing { precio_un_pago } logistica { stock } } }",
+  "query": "query Productos($texto: String, $cantidad: Int) { total_products(search: $texto) products(search: $texto, limit: $cantidad) { sku nombre marca pricing { precio_tachado precio_final costo cuotas_sin_interes precio_1_pago } logistica { stock_web stock } } }",
   "variables": {
     "texto": "televisor",
     "cantidad": 10
@@ -255,4 +260,3 @@ Estas variables se configuran en el entorno de despliegue, no en el consumidor:
 ## Buscador de productos por SKU y PDF
 
 La página estática `/buscador.html` (ver `public/buscador.html`) permite buscar un producto por SKU, ver toda su información y descargar una ficha en PDF con nombre, SKU, descripción y atributos. Usa la contraseña del panel (`PANEL_PASSWORD`) y consulta el snapshot mediante `?mode=graphql`; el PDF se genera en el navegador con jsPDF. Acepta `/buscador.html?sku=XXXX` para abrir un producto directamente.
-

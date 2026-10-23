@@ -54,12 +54,17 @@ La respuesta incluye fechas del snapshot, el total y una lista de productos. Eje
       "habilitado": true,
       "updated_at": "2026-10-23T05:40:00.000Z",
       "pricing": {
-        "precio_lista": 100000,
-        "precio_un_pago": 90000,
-        "cuotas_sin_interes": 6
+        "precio_tachado": 460794.75,
+        "precio_final": 424500,
+        "costo": null,
+        "cuotas_sin_interes": 6,
+        "precio_1_pago": 394000,
+        "precio_lista": 460794.75,
+        "precio_un_pago": 394000
       },
       "logistica": {
         "stock": 4,
+        "stock_web": 4,
         "stock_por_sucursal": {
           "Sucursal Centro": 2,
           "Sucursal Norte": 2
@@ -75,7 +80,7 @@ La respuesta incluye fechas del snapshot, el total y una lista de productos. Eje
 }
 ```
 
-Los valores son ilustrativos. Los campos sin datos pueden omitirse. `stock_por_sucursal` solo aparece cuando hay sucursales con stock positivo. `logistica.costo` puede estar presente y corresponde a un dato interno: consumilo únicamente si está autorizado para esta integración.
+Los valores de precios y stock son ilustrativos. `precio_tachado` es el precio regular tachado en la web; `precio_final` es el precio principal vigente (también puede ser el precio en cuotas); `precio_1_pago` es el importe numérico extraído del campo del feed (por ejemplo, `394000` desde `394000 | 7.2% OFF`); `cuotas_sin_interes` se devuelve como cantidad numérica. `logistica.stock_web` es la suma del stock de los depósitos web 5 (Depósito) y 50 (Depósito 2), según el feed. `logistica.stock` se conserva por compatibilidad y puede provenir del archivo externo de stock/costos; para el total web usá `stock_web`. `stock_por_sucursal` muestra las sucursales con stock positivo e incluye los depósitos cuando tienen unidades. `costo` se expone en `pricing` y también puede estar en `logistica`; es un dato interno, consumilo únicamente si está autorizado para esta integración. Los campos antiguos `precio_lista` y `precio_un_pago` se mantienen por compatibilidad; para nuevas integraciones usá los nombres explícitos. Los campos sin datos se devuelven como `null`.
 
 Los productos deshabilitados se incluyen con la misma información disponible que los habilitados, según la configuración del catálogo. Para omitirlos en una consulta, agregá `?include_disabled=0`.
 
@@ -88,7 +93,7 @@ curl --fail-with-body \
   -H "Authorization: Bearer ${API_TOKEN}" \
   -H "Content-Type: application/json" \
   -X POST \
-  -d '{"query":"query Producto($sku: String!) { product(sku: $sku) { sku nombre habilitado updated_at pricing { precio_lista precio_un_pago cuotas_sin_interes } logistica { stock stock_por_sucursal } catalogo { descripcion atributos imagenes } } }","variables":{"sku":"SKU-123"}}' \
+  -d '{"query":"query Producto($sku: String!) { product(sku: $sku) { sku nombre habilitado updated_at pricing { precio_tachado precio_final costo cuotas_sin_interes precio_1_pago } logistica { stock_web stock stock_por_sucursal } catalogo { descripcion atributos imagenes } } }","variables":{"sku":"SKU-123"}}' \
   "https://xml-json-feed-magento-cda.vercel.app/api/feed?mode=graphql"
 ```
 
@@ -99,8 +104,8 @@ query {
   products(search: "televisor", habilitado: true, limit: 20, offset: 0) {
     sku
     nombre
-    pricing { precio_un_pago }
-    logistica { stock }
+    pricing { precio_tachado precio_final costo cuotas_sin_interes precio_1_pago }
+    logistica { stock_web stock }
   }
   total_products(search: "televisor", habilitado: true)
 }
