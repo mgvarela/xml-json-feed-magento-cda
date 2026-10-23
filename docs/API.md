@@ -93,6 +93,7 @@ Los valores del ejemplo son ilustrativos. Algunos campos pueden ser `null`, y `s
 - `generated_at`: momento de la última generación del snapshot.
 - `pricing_updated_at`: momento de la última actualización procesada de precios y logística.
 - `catalog_updated_at`: momento de la última actualización de catálogo.
+- `updated_at`: fecha de modificación del producto informada por el feed de catálogo. No es la fecha de generación del JSON; las actualizaciones `pricing` conservan este valor y solo actualizan habilitación, precios y logística.
 - `total_products`: cantidad de productos en el snapshot.
 - `products`: catálogo consolidado.
 - `pricing`: precios y vigencias, si el feed los informa.

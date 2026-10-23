@@ -130,13 +130,13 @@ function updatedAtValue(x) {
 function cleanDescription(html) {
     let t = val(html);
     if (t === null) return null;
+    t = t.replace(/&nbsp;/gi, ' ').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>')
+        .replace(/&quot;/gi, '"').replace(/&#0?39;/g, "'").replace(/&amp;/gi, '&');
     t = t.replace(/<style[\s\S]*?<\/style>/gi, ' ');
     t = t.replace(/#html-body[^{}]*\{[^}]*\}/g, ' ');
     t = t.replace(/\[data-pb-style=[^\]]*\][^{}]*\{[^}]*\}/g, ' ');
     t = t.replace(/<(br|\/p|\/div|\/li|\/h[1-6]|\/tr)\s*\/?>/gi, '\n');
     t = t.replace(/<[^>]+>/g, ' ');
-    t = t.replace(/&nbsp;/gi, ' ').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>')
-        .replace(/&quot;/gi, '"').replace(/&#0?39;/g, "'").replace(/&amp;/gi, '&');
     t = t.split('\n').map(l => l.replace(/[ \t]+/g, ' ').trim()).filter(Boolean).join('\n');
     return t || null;
 }
