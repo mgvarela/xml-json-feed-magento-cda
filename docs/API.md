@@ -217,8 +217,7 @@ Content-Type: application/json
 }
 ```
 
-include_disabled (opcional, por defecto 	rue) define si el JSON incluye los productos deshabilitados. Un producto deshabilitado se entrega en una sola línea mínima (sku, parent_sku, 
-ombre, habilitado: false), sin atributos, precios ni stock; con alse se omiten por completo. Se puede forzar por consulta con ?include_disabled=0|1.
+include_disabled (opcional, por defecto `true`) define si el JSON incluye los productos deshabilitados. Cuando se incluyen, se devuelven con toda la información disponible; con `false` se omiten por completo. Se puede forzar por consulta con `?include_disabled=0|1`.
 
 Solo se aceptan URLs que estén incluidas en la configuración de feeds de la aplicación. Este endpoint es administrativo y normalmente no hace falta para un consumidor que únicamente consulta el catálogo.
 

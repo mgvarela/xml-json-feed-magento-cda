@@ -55,6 +55,11 @@ function toNumber(x) {
     return Number.isFinite(n) ? n : null;
 }
 
+function toPriceNumber(x) {
+    const s = val(x);
+    return toNumber(s === null ? null : s.split('|', 1)[0]);
+}
+
 function toBool(x) {
     if (x === true || x === 1) return true;
     const s = val(x);
@@ -98,19 +103,11 @@ function toPublicProduct(p) {
     return pruneNulls(out);
 }
 
-// Producto deshabilitado: una sola línea mínima, sin atributos, precios ni stock
-function toDisabledStub(p) {
-    return pruneNulls({ sku: p.sku, parent_sku: p.parent_sku, nombre: p.nombre, habilitado: false });
-}
-
 function buildPublicProducts(products, includeDisabled) {
     const out = [];
     for (const p of products) {
-        if (p.habilitado === false) {
-            if (includeDisabled) out.push(toDisabledStub(p));
-        } else {
-            out.push(toPublicProduct(p));
-        }
+        if (p.habilitado === false && !includeDisabled) continue;
+        out.push(toPublicProduct(p));
     }
     return out;
 }
@@ -253,7 +250,12 @@ function buildProduct(prod, parentSku, costosMap, costosOk, prev) {
     const sku = val(prod.sku);
     const stockPorSucursal = parseBranchStock(prod.logistica);
     const ext = sku ? costosMap[sku.toUpperCase()] : undefined;
-    const feedStock = toNumber(prod.logistica?.stock_total ?? prod.logistica?.stock ?? prod.stock_total ?? prod.stock);
+    const feedStock = toNumber(prod.logistica?.stock_total)
+        ?? toNumber(prod.logistica?.stock_web)
+        ?? toNumber(prod.logistica?.stock)
+        ?? toNumber(prod.stock_total)
+        ?? toNumber(prod.stock);
+    const p = prod.pricing || {};
 
     let costo;
     let stock;
@@ -263,7 +265,9 @@ function buildProduct(prod, parentSku, costosMap, costosOk, prev) {
         costo = prev.logistica?.costo ?? null;
         stock = prev.logistica?.stock ?? feedStock;
     } else {
-        costo = ext && ext.costo !== null ? ext.costo : toNumber(prod.logistica?.costo ?? prod.costo);
+        costo = ext && ext.costo !== null
+            ? ext.costo
+            : toNumber(prod.logistica?.costo) ?? toNumber(p.costo) ?? toNumber(prod.costo);
         // El stock local tiene prioridad sobre el del feed
         stock = ext && ext.stock !== null ? ext.stock : feedStock;
         stockDiscrepancy = !!ext && ext.stock !== null && feedStock !== null && ext.stock !== feedStock;
@@ -273,7 +277,6 @@ function buildProduct(prod, parentSku, costosMap, costosOk, prev) {
     const imagenes = asArray(prod.catalogo?.imagenes?.imagen ?? prod.imagenes?.imagen)
         .map(i => val(i)).filter(Boolean);
 
-    const p = prod.pricing || {};
     return {
         stockDiscrepancy,
         record: pruneNulls({
@@ -286,8 +289,8 @@ function buildProduct(prod, parentSku, costosMap, costosOk, prev) {
             habilitado: toBool(prod.habilitado),
             updated_at: toIsoDate(updatedAtValue(prod.updated_at)),
             pricing: {
-                precio_lista: toNumber(p.precio_lista),
-                precio_un_pago: toNumber(p.precio_un_pago),
+                precio_lista: toNumber(p.precio_tachado) ?? toNumber(p.precio_lista) ?? toNumber(p.precio_final),
+                precio_un_pago: toPriceNumber(p.precio_1_pago) ?? toNumber(p.precio_un_pago) ?? toNumber(p.precio_final),
                 cuotas_sin_interes: toNumber(p.cuotas_sin_interes)
             },
             logistica: Object.keys(stockPorSucursal).length ? { costo, stock, stock_por_sucursal: stockPorSucursal } : { costo, stock },
@@ -350,7 +353,7 @@ async function writeSnapshot(snapshot) {
     });
 }
 
-// Config guardada (sin config: todos los feeds y se incluyen deshabilitados en formato mínimo)
+// Config guardada (sin config: todos los feeds y se incluyen los deshabilitados)
 async function readConfig() {
     const fallback = { enabledFeeds: [...GLOBAL_FEEDS], includeDisabled: true };
     try {
