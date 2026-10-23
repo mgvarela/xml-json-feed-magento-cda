@@ -159,7 +159,7 @@ function cleanDescription(html) {
     t = t.replace(/<style[\s\S]*?<\/style>/gi, ' ');
     t = t.replace(/#html-body[^{}]*\{[^}]*\}/g, ' ');
     t = t.replace(/\[data-pb-style=[^\]]*\][^{}]*\{[^}]*\}/g, ' ');
-    t = t.replace(/<(br|\/p|\/div|\/li|\/h[1-6]|\/tr)\s*\/?>/gi, '\n');
+    t = t.replace(/<\/?(?:br|p|div|li|h[1-6]|tr)\b[^>]*>/gi, ' ');
     t = t.replace(/<[^>]+>/g, ' ');
     t = t.split('\n').map(l => l.replace(/[ \t]+/g, ' ').trim()).filter(Boolean).join('\n');
     return t || null;
