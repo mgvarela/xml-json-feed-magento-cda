@@ -61,8 +61,6 @@ Respuesta resumida:
         "costo": null,
         "cuotas_sin_interes": 6,
         "precio_1_pago": 394000,
-        "precio_lista": 460794.75,
-        "precio_un_pago": 394000,
         "vigencia_desde": null,
         "vigencia_hasta": null
       },
@@ -91,7 +89,7 @@ Respuesta resumida:
 }
 ```
 
-Los valores de los precios y el stock son ilustrativos. `precio_tachado` es el precio regular tachado en la web; `precio_final` es el precio principal vigente (que puede corresponder al precio en cuotas); `precio_1_pago` es el importe numérico extraído del campo del feed; `cuotas_sin_interes` se devuelve como cantidad numérica. `logistica.stock_web` es la suma del stock de los depósitos web 5 (Depósito) y 50 (Depósito 2), según el feed. `logistica.stock` se mantiene por compatibilidad y puede provenir del archivo externo de stock/costos; para consultar el total de stock web usá `stock_web`. `stock_por_sucursal` muestra las sucursales con stock positivo e incluye los depósitos cuando tienen unidades. `costo` se incluye en `pricing` y puede repetirse en `logistica`; es un dato interno, así que consumilo solo si su uso está autorizado. `precio_lista` y `precio_un_pago` se mantienen por compatibilidad con consumidores existentes; para nuevas integraciones usá los nombres explícitos. Los campos sin datos se devuelven como `null`. `atributos` es dinámico: sus claves dependen de los atributos disponibles en el feed. Las variantes se devuelven como productos independientes, con su propio `sku` y el `parent_sku` del producto padre.
+Los valores de los precios y el stock son ilustrativos. `precio_tachado` es el precio regular tachado en la web; `precio_final` es el precio principal vigente (que puede corresponder al precio en cuotas); `precio_1_pago` es el importe numérico extraído del campo del feed; `cuotas_sin_interes` se devuelve como cantidad numérica. `logistica.stock_web` es la suma del stock de los depósitos web 5 (Depósito) y 50 (Depósito 2), según el feed. `logistica.stock` se mantiene por compatibilidad y puede provenir del archivo externo de stock/costos; para consultar el total de stock web usá `stock_web`. `stock_por_sucursal` muestra las sucursales con stock positivo e incluye los depósitos cuando tienen unidades. `costo` se incluye en `pricing` y puede repetirse en `logistica`; es un dato interno, así que consumilo solo si su uso está autorizado. Los campos sin datos se devuelven como `null`. `atributos` es dinámico: sus claves dependen de los atributos disponibles en el feed. Las variantes se devuelven como productos independientes, con su propio `sku` y el `parent_sku` del producto padre.
 
 ### Campos del snapshot
 

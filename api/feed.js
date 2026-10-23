@@ -96,13 +96,14 @@ function toPublicProduct(p) {
     const { _feed, ...base } = p;
     const out = { ...base, url: toHttps(p.url) };
     if (p.pricing) {
+        const { precio_lista, precio_un_pago, ...pricing } = p.pricing;
         const precioTachado = toNumber(p.pricing.precio_tachado) ?? toNumber(p.pricing.precio_lista);
         const precioFinal = toNumber(p.pricing.precio_final)
             ?? toNumber(p.pricing.precio_un_pago)
             ?? toNumber(p.pricing.precio_lista);
         const precioUnPago = toPriceNumber(p.pricing.precio_1_pago);
         out.pricing = {
-            ...p.pricing,
+            ...pricing,
             precio_tachado: precioTachado,
             precio_final: precioFinal,
             precio_1_pago: precioUnPago,
@@ -322,8 +323,6 @@ function buildProduct(prod, parentSku, costosMap, costosOk, prev) {
                     ?? toNumber(p.precio_lista),
                 precio_1_pago: toPriceNumber(p.precio_1_pago),
                 costo: toNumber(p.costo) ?? costo,
-                precio_lista: toNumber(p.precio_tachado) ?? toNumber(p.precio_lista) ?? toNumber(p.precio_final),
-                precio_un_pago: toPriceNumber(p.precio_1_pago) ?? toNumber(p.precio_un_pago) ?? toNumber(p.precio_final),
                 cuotas_sin_interes: toNumber(p.cuotas_sin_interes)
             },
             logistica: Object.keys(stockPorSucursal).length
@@ -452,8 +451,6 @@ const PricingType = new GraphQLObjectType({
         precio_final: { type: GraphQLFloat },
         precio_1_pago: { type: GraphQLFloat },
         costo: { type: GraphQLFloat },
-        precio_lista: { type: GraphQLFloat },
-        precio_un_pago: { type: GraphQLFloat },
         cuotas_sin_interes: { type: GraphQLFloat }
     }
 });
