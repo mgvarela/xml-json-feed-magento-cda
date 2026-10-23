@@ -161,6 +161,8 @@ function cleanDescription(html) {
     t = t.replace(/\[data-pb-style=[^\]]*\][^{}]*\{[^}]*\}/g, ' ');
     t = t.replace(/<\/?(?:br|p|div|li|h[1-6]|tr)\b[^>]*>/gi, ' ');
     t = t.replace(/<[^>]+>/g, ' ');
+    t = t.replace(/([.!?])([A-ZÁÉÍÓÚÜÑ])/g, '$1 $2')
+        .replace(/([a-záéíóúüñ]{2,})([A-ZÁÉÍÓÚÜÑ][a-záéíóúüñ]+)/g, '$1 $2');
     t = t.split('\n').map(l => l.replace(/[ \t]+/g, ' ').trim()).filter(Boolean).join('\n');
     return t || null;
 }
