@@ -95,6 +95,10 @@ function pruneNulls(o) {
 function toPublicProduct(p) {
     const { _feed, ...base } = p;
     const out = { ...base, url: toHttps(p.url) };
+    if (p.logistica) {
+        out.logistica = { ...p.logistica };
+        delete out.logistica.costo;
+    }
     if (p.pricing) {
         const { precio_lista, precio_un_pago, ...pricing } = p.pricing;
         const precioTachado = toNumber(p.pricing.precio_tachado) ?? toNumber(p.pricing.precio_lista);
@@ -111,10 +115,10 @@ function toPublicProduct(p) {
             cuotas_sin_interes: toNumber(p.pricing.cuotas_sin_interes)
         };
     }
-    const sucursales = p.logistica?.stock_por_sucursal;
+    const sucursales = out.logistica?.stock_por_sucursal;
     if (sucursales) {
         const conStock = Object.fromEntries(Object.entries(sucursales).filter(([, q]) => q > 0));
-        out.logistica = { ...p.logistica, stock_por_sucursal: Object.keys(conStock).length ? conStock : undefined };
+        out.logistica = { ...out.logistica, stock_por_sucursal: Object.keys(conStock).length ? conStock : undefined };
     }
     const publicProduct = pruneNulls(out);
     if (out.pricing) {
@@ -292,7 +296,7 @@ function buildProduct(prod, parentSku, costosMap, costosOk, prev) {
     let stockDiscrepancy = false;
     if (!costosOk && prev) {
         // Sin JSON de costos disponible: se conserva lo último conocido
-        costo = prev.logistica?.costo ?? null;
+        costo = prev.pricing?.costo ?? prev.logistica?.costo ?? null;
         stock = prev.logistica?.stock ?? feedStock;
     } else {
         costo = ext && ext.costo !== null
@@ -328,8 +332,8 @@ function buildProduct(prod, parentSku, costosMap, costosOk, prev) {
                 cuotas_sin_interes: toNumber(p.cuotas_sin_interes)
             },
             logistica: Object.keys(stockPorSucursal).length
-                ? { costo, stock, stock_web: stockWeb, stock_por_sucursal: stockPorSucursal }
-                : { costo, stock, stock_web: stockWeb },
+                ? { stock, stock_web: stockWeb, stock_por_sucursal: stockPorSucursal }
+                : { stock, stock_web: stockWeb },
             catalogo: {
                 descripcion,
                 atributos: buildAttributes(prod, descripcion),
@@ -460,7 +464,6 @@ const PricingType = new GraphQLObjectType({
 const LogisticsType = new GraphQLObjectType({
     name: 'Logistica',
     fields: {
-        costo: { type: GraphQLFloat },
         stock: { type: GraphQLFloat },
         stock_web: { type: GraphQLFloat },
         stock_por_sucursal: { type: JSONScalar }
