@@ -20,11 +20,10 @@ const {
 const GLOBAL_FEEDS = process.env.FEED_URLS
     ? process.env.FEED_URLS.split(',').map(s => s.trim()).filter(Boolean)
     : [
-        'https://casadelaudio.com/media/feed/api_info_uke.xml',
-        'https://casadelaudio.com/media/feed/api_info_electro.xml',
-        'https://casadelaudio.com/media/feed/api_info_lineablanca.xml',
-        'https://casadelaudio.com/media/feed/api_info_hogar.xml',
-        'https://casadelaudio.com/media/feed/api_info_peque_electro.xml'
+        'https://casadelaudio.com/media/feed/api_info_electro_qdo5cHa6c7HCkXBCuP5w.xml',
+        'https://casadelaudio.com/media/feed/api_info_lineablanca_CjQki8FRSt1ZkG3T7E3f.xml',
+        'https://casadelaudio.com/media/feed/api_info_hogar_jso6kvy2jgAMjlTU287g.xml',
+        'https://casadelaudio.com/media/feed/api_info_peque_electro_rXxY5VKZKeGlqNQ25NJ5.xml'
     ];
 
 const SNAPSHOT_PATH = 'feed/snapshot.json';
